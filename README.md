@@ -1,5 +1,7 @@
 # Stella — Unified Astrology & Divination MCP Server 🌙
 
+**Repo:** [PoweredbyPugs/stella-mcp](https://github.com/PoweredbyPugs/stella-mcp)
+
 The Moon of Gnosis. Merges three MCP servers into a single Python server:
 
 1. **Helios Bridge** — 14+ ephemeris tools wrapping the Swiss Ephemeris REST API (+ auto-discovered endpoints)
