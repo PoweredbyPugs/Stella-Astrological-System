@@ -292,24 +292,257 @@ async def get_zodiacal_releasing(
     name: str,
     lot: Optional[str] = None,
     date: Optional[str] = None,
+    time: Optional[str] = None,
 ) -> str:
-    """Get Zodiacal Releasing L1 and L2 periods for a stored chart.
+    """Get Zodiacal Releasing L1-L5 periods for a stored chart.
 
+    Native calculation - no external API dependency.
     Includes peak periods and loosing of the bond.
 
     Args:
         name: Name of the stored chart
-        lot: 'spirit' or 'fortune'
-        date: Target date YYYY-MM-DD
+        lot: 'spirit' or 'fortune' (default: both)
+        date: Target date YYYY-MM-DD (default: today)
+        time: Target time HH:MM (default: now)
     """
-    parts = []
-    if lot:
-        parts.append(f"lot={lot}")
+    from datetime import datetime
+    from zr import zr_for_chart, format_zr_summary
+    
+    # Load chart
+    chart_json = load_chart(name)
+    if not chart_json or "not found" in chart_json.lower():
+        return json.dumps({"error": f"Chart not found: {name}"})
+    
+    chart_data = json.loads(chart_json)
+    
+    # Parse target datetime
     if date:
-        parts.append(f"date={date}")
-    query = f"?{'&'.join(parts)}" if parts else ""
-    data = await call_sweph(f"/zr/{name}{query}")
-    return json.dumps(data, indent=2)
+        if time:
+            target_dt = datetime.fromisoformat(f"{date}T{time}:00")
+        else:
+            target_dt = datetime.fromisoformat(f"{date}T12:00:00")
+    else:
+        target_dt = datetime.now()
+    
+    results = []
+    
+    lots_to_calc = [lot] if lot else ["spirit", "fortune"]
+    
+    for lot_name in lots_to_calc:
+        try:
+            snapshot = zr_for_chart(chart_data, target_dt, lot_name)
+            results.append({
+                "lot": lot_name,
+                "summary": format_zr_summary(snapshot),
+                "data": snapshot.to_dict(),
+            })
+        except Exception as e:
+            results.append({
+                "lot": lot_name,
+                "error": str(e),
+            })
+    
+    return json.dumps(results, indent=2, default=str)
+
+
+@mcp.tool()
+async def get_zr_report(
+    name: str,
+    date: Optional[str] = None,
+    time: Optional[str] = None,
+) -> str:
+    """Generate comprehensive Zodiacal Releasing report using Brennan worksheet framework.
+
+    Includes: peak periods from Fortune, sect analysis, angular triads,
+    planets by phase, current periods, and key observations.
+
+    Args:
+        name: Name of the stored chart
+        date: Target date YYYY-MM-DD (default: today)
+        time: Target time HH:MM (default: now)
+    """
+    from datetime import datetime
+    from zr_report import generate_zr_report
+    
+    # Load chart
+    chart_json = load_chart(name)
+    if not chart_json or "not found" in chart_json.lower():
+        return json.dumps({"error": f"Chart not found: {name}"})
+    
+    chart_data = json.loads(chart_json)
+    
+    # Parse target datetime
+    if date:
+        if time:
+            target_dt = datetime.fromisoformat(f"{date}T{time}:00")
+        else:
+            target_dt = datetime.fromisoformat(f"{date}T12:00:00")
+    else:
+        target_dt = datetime.now()
+    
+    report = generate_zr_report(chart_data, target_dt)
+    return report
+
+
+@mcp.tool()
+async def get_ki(
+    date: Optional[str] = None,
+    birth_date: Optional[str] = None,
+) -> str:
+    """Calculate 9 Star Ki numbers for a date.
+
+    Returns the three Ki numbers (year.month.third) using the Lo Shu
+    Flying Star method.
+
+    Args:
+        date: Target date YYYY-MM-DD (default: today) - for transiting Ki
+        birth_date: Birth date YYYY-MM-DD - for natal Ki profile
+    
+    Returns either transiting Ki for a date or natal Ki profile.
+    """
+    from datetime import date as date_type
+    from ki import calculate_ki, calculate_natal_ki, calculate_current_ki, format_ki_report
+    
+    if birth_date:
+        # Calculate natal Ki
+        bd = date_type.fromisoformat(birth_date)
+        result = calculate_natal_ki(bd)
+    elif date:
+        # Calculate Ki for specific date
+        d = date_type.fromisoformat(date)
+        result = calculate_current_ki(d)
+    else:
+        # Calculate current Ki
+        result = calculate_current_ki()
+    
+    report = format_ki_report(result)
+    return report
+
+
+@mcp.tool()
+async def get_ki_cycle(
+    birth_date: str,
+    target_date: Optional[str] = None,
+) -> str:
+    """Get full 9 Star Ki profile with current personal cycle.
+
+    Calculates natal Ki and where the person is in their current
+    year/month cycle using Flying Star Lo Shu method.
+
+    Args:
+        birth_date: Birth date YYYY-MM-DD
+        target_date: Target date YYYY-MM-DD (default: today)
+    
+    Returns natal Ki + personal year + personal month.
+    """
+    from datetime import date as date_type
+    from ki import get_full_profile, KI_TRIGRAMS
+    
+    bd = date_type.fromisoformat(birth_date)
+    td = date_type.fromisoformat(target_date) if target_date else None
+    
+    profile = get_full_profile(bd, td)
+    natal = profile['natal']
+    cycle = profile['current_cycle']
+    
+    lines = []
+    lines.append(f"# 9 Star Ki Profile")
+    lines.append(f"**Birth Date:** {natal['birth_date']}")
+    lines.append("")
+    lines.append(f"## Natal Ki: {natal['sequence']}")
+    yi = natal['year_info']
+    mi = natal['month_info']
+    ti = natal['third_info']
+    lines.append(f"- Year: **{natal['ki_year']} {yi['trigram']} {yi['name']}** ({yi['element']})")
+    lines.append(f"- Month: **{natal['ki_month']} {mi['trigram']} {mi['name']}** ({mi['element']})")
+    lines.append(f"- Third: **{natal['ki_third']} {ti['trigram']} {ti['name']}** ({ti['element']})")
+    lines.append("")
+    lines.append(f"## Current Cycle ({cycle['date']})")
+    lines.append(f"**Global:** {cycle['global_year']}.{cycle['global_month']}")
+    pyi = cycle['personal_year_info']
+    pmi = cycle['personal_month_info']
+    lines.append(f"**Personal Year:** {cycle['personal_year']} {pyi['trigram']} {pyi['name']} ({pyi['element']})")
+    lines.append(f"**Personal Month:** {cycle['personal_month']} {pmi['trigram']} {pmi['name']} ({pmi['element']})")
+    
+    return "\n".join(lines)
+
+
+@mcp.tool()
+async def get_ki_reading(
+    birth_date: str,
+    target_date: Optional[str] = None,
+) -> str:
+    """Generate combined 9 Star Ki + I Ching reading.
+
+    Calculates natal Ki, personal cycle, derives hexagram from Ki positions,
+    and retrieves relevant I Ching wisdom for a synthesized reading.
+
+    The hexagram is derived from Ki (not randomly cast):
+    - Lower trigram = Personal Year Ki
+    - Upper trigram = Personal Month Ki
+    - Transformation shows next month's hexagram
+    - Changing lines are the lines that differ between hexagrams
+
+    Args:
+        birth_date: Birth date YYYY-MM-DD
+        target_date: Target date YYYY-MM-DD (default: today)
+    """
+    from datetime import date as date_type, timedelta
+    from ki import get_full_profile, KI_TRIGRAMS, calculate_personal_cycle
+    from ki_reading import (
+        format_full_reading, ki_to_hexagram, 
+        get_hexagram_lines, find_changing_lines, get_next_month_ki
+    )
+    import json
+    
+    bd = date_type.fromisoformat(birth_date)
+    td = date_type.fromisoformat(target_date) if target_date else date_type.today()
+    
+    # Get Ki profile
+    profile = get_full_profile(bd, td)
+    natal = profile['natal']
+    cycle = profile['current_cycle']
+    
+    # Derive hexagram from Ki positions
+    current_hex = ki_to_hexagram(cycle['personal_year'], cycle['personal_month'])
+    
+    # Get next month Ki and hexagram
+    next_month_ki = get_next_month_ki(natal['ki_year'], td)
+    next_hex = ki_to_hexagram(cycle['personal_year'], next_month_ki)
+    
+    # Find changing lines
+    changing_lines = []
+    if current_hex and next_hex:
+        current_lines = get_hexagram_lines(cycle['personal_year'], cycle['personal_month'])
+        next_lines = get_hexagram_lines(cycle['personal_year'], next_month_ki)
+        if current_lines and next_lines:
+            changing_lines = find_changing_lines(current_lines, next_lines)
+    
+    # Get wisdom from knowledge graph based on derived hexagram AND changing lines
+    wisdom_snippets = []
+    if current_hex:
+        try:
+            # Search for the hexagram with line-specific wisdom
+            if changing_lines:
+                line_terms = " ".join([f"line {l}" for l in changing_lines])
+                search_terms = f"hexagram {current_hex} {line_terms}"
+            else:
+                search_terms = f"hexagram {current_hex}"
+            
+            wisdom_results = retrieve_wisdom(search_terms, top_k=5)
+            if wisdom_results:
+                results = json.loads(wisdom_results)
+                if isinstance(results, list):
+                    for r in results[:4]:
+                        if isinstance(r, dict) and 'text' in r:
+                            wisdom_snippets.append(r['text'][:500])
+        except:
+            pass  # Wisdom is optional
+    
+    # Generate reading (hexagram is derived inside format_full_reading)
+    reading = format_full_reading(bd, td, None, wisdom_snippets)
+    
+    return reading
 
 
 @mcp.tool()
@@ -404,6 +637,55 @@ async def get_current_dignities(
     return json.dumps(data, indent=2)
 
 
+@mcp.tool()
+async def get_void_of_course_moons(
+    timeframe: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> str:
+    """Get Void of Course Moon periods.
+
+    Uses traditional Ptolemaic aspects (conjunction, sextile, square, trine, opposition)
+    to determine when the Moon makes its last major aspect before changing signs.
+
+    Three ways to specify the period:
+    1. timeframe: 'day', 'week', or 'month' (relative to today)
+    2. start_date + end_date: Custom date range (YYYY-MM-DD format)
+    3. Neither: defaults to 'week'
+
+    Args:
+        timeframe: 'day' | 'week' | 'month' — relative period from today
+        start_date: Start of custom range (YYYY-MM-DD), requires end_date
+        end_date: End of custom range (YYYY-MM-DD), requires start_date
+
+    Returns:
+        JSON array of VOC periods with:
+        - start: When Moon goes VOC (last Ptolemaic aspect)
+        - end: When Moon enters the next sign
+        - duration: Human-readable duration
+        - lastAspect: Details of the final aspect before VOC
+        - nextSign: The sign Moon will enter
+    """
+    parts = []
+
+    # Custom date range takes precedence
+    if start_date and end_date:
+        parts.append(f"start={start_date}")
+        parts.append(f"end={end_date}")
+    elif timeframe:
+        # Validate timeframe
+        if timeframe.lower() not in ("day", "week", "month"):
+            return json.dumps({
+                "error": f"Invalid timeframe '{timeframe}'. Use 'day', 'week', or 'month'."
+            })
+        parts.append(f"timeframe={timeframe.lower()}")
+    # else: no params = Helios defaults to week
+
+    query = f"?{'&'.join(parts)}" if parts else ""
+    data = await call_sweph(f"/void-of-course-moons{query}")
+    return json.dumps(data, indent=2)
+
+
 # ── Auto-discover additional sweph endpoints ──
 
 async def discover_and_register():
@@ -411,7 +693,7 @@ async def discover_and_register():
     core_endpoints = {
         "/moon-now", "/planets-now", "/aspects-now", "/weekly-major-phase",
         "/natal-chart", "/generate-chart", "/charts", "/dignity-score",
-        "/current-dignities", "/api-info",
+        "/current-dignities", "/api-info", "/void-of-course-moons",
     }
     core_prefixes = ["/chart/", "/profections/", "/zr/", "/transits/"]
 
@@ -1608,17 +1890,26 @@ relevant) OR one composed aphorism. Not both.""",
         "label": "M — Working Reading",
         "target_length": "1-2 pages",
         "depth": """All interpretive lenses addressed with moderate depth.
-How this person presents to the world vs. who they are inside. Their emotional
-patterns — what feels safe, what triggers defense, how they process experience.
-What they attract in relationships and why. How early life shaped their coping.
-Their natural gifts and where they overcompensate. How motivation and purpose
-flow through their life. The current chapter and what it's asking of them.
-Written as a continuous narrative — warm, direct, psychologically grounded.
+
+NARRATIVE RULES:
+- Write in SECOND PERSON ("you may find..." not "she is...")
+- NO astro jargon in the narrative — pure human experience language
+- Use INVITATIONAL language: "suggests," "may," "the potential here is"
+- Rigorous technique → illuminated possibility → space for agency
+- Technical summary goes in APPENDIX at end, not in narrative
+- Include outer planet archetypes as psychological themes (for Psychological framework)
+
+CONTENT:
+How you present to the world vs. who you are inside. Emotional patterns —
+what feels safe, what triggers defense, how you process experience.
+What you attract in relationships and why. How early life shaped coping.
+Natural gifts and where you overcompensate. How motivation and purpose
+flow through life. The current chapter and what it's asking of you.
+
+Written as a continuous narrative — warm, direct, invitational.
 Knowledge graph material absorbed and synthesized, never cited as astrology.
 
-SECTION QUOTES: For 1-2 key sections, include ONE opening quote from the
-knowledge graph (only if it specifically supports the text) OR ONE closing
-aphorism. End the full reading with one that captures the whole. Restraint.""",
+SECTION QUOTES: 1-2 key sections get ONE quote. End with one that captures the whole. Restraint.""",
         "knowledge_results": 3,
     },
     "l": {
@@ -1626,30 +1917,33 @@ aphorism. End the full reading with one that captures the whole. Restraint.""",
         "target_length": "3-5 pages",
         "depth": """Full narrative interpretation across all lenses.
 
-How the face this person shows the world differs from who they are when
-alone. The emotional interior — how they take in experience, what soothes
-them, what overwhelms them, and how that resonates outward into how people
-perceive them. What they attract in relationships and why — the feedback
-loop between self and other. How early life conditions shaped their coping
-strategies, attachment patterns, and sense of safety. What operates below
-awareness — the patterns they can't see but others can. Where their life
-is more private vs. public-facing and what that means.
+NARRATIVE RULES:
+- Write in SECOND PERSON ("you may find..." not "she is...")
+- NO astro jargon in the narrative — pure human experience language
+- Use INVITATIONAL language: "suggests," "may," "the potential here is"
+- Rigorous technique → illuminated possibility → space for agency
+- Technical summary goes in APPENDIX at end
+- Include outer planet archetypes as psychological themes (for Psychological framework)
+
+CONTENT:
+How the face you show the world differs from who you are when alone.
+The emotional interior — how you take in experience, what soothes you,
+what overwhelms you. What you attract in relationships and why — the
+feedback loop between self and other. How early life conditions shaped
+coping strategies, attachment patterns, and sense of safety. What operates
+below awareness — patterns you can't see but others can.
 
 Strengths described not as gifts but as *developed capacities* — things
-this person has built through effort. Challenges described not as flaws
-but as friction points where growth is available. The internal logic of
-how motivation, energy, and purpose flow through their life.
+built through effort. Challenges described not as flaws but as friction
+points where growth is available. The internal logic of how motivation,
+energy, and purpose flow through life.
 
 Psychological frameworks woven throughout: attachment theory, Jungian
 individuation, shadow work, internal family systems, developmental stages.
-The knowledge graph material fully absorbed and expressed as insight.
-The current life chapter given biographical weight — where have they been,
-where are they now, what's being asked of them.
+The current life chapter given biographical weight — where have you been,
+where are you now, what's being asked of you.
 
-SECTION QUOTES: A section may get ONE opening quote from the knowledge
-graph (only if it specifically supports the text that follows) OR ONE
-closing aphorism (only if the section earns it). Never both. 2-3 total
-across the whole reading. Restraint over decoration.""",
+SECTION QUOTES: 2-3 total across the whole reading. Restraint over decoration.""",
         "knowledge_results": 4,
     },
     "xl": {
@@ -1789,29 +2083,54 @@ Beauty is not decoration — it's compression of truth.""",
 # ── Frameworks (the lens — WHAT interpretive tradition shapes the reading) ──
 # Named after Mercury — the planet of thought, interpretation, and meaning-making.
 
+## ── Baseline ──
+# Hellenistic + Whole Sign Houses is the backbone of ALL readings.
+# Sect, dignity, lots, depositors, timing techniques. This isn't a framework
+# choice — it's how we do astrology. All frameworks layer ON TOP of this.
+
 FRAMEWORKS = {
     "psychological": {
         "label": "Psychological",
-        "description": "Modern depth psychology. Attachment, shadow, individuation.",
+        "description": "Modern depth psychology. Attachment, shadow, individuation. Outer planet archetypes.",
         "instructions": """FRAMEWORK: PSYCHOLOGICAL (NON-FATALIST, NON-DETERMINISTIC)
-The chart describes archetypal fields of possibility, not fixed outcomes.
 
-Use psychological frameworks as the language of interpretation:
+BASELINE: Hellenistic techniques (sect, dignity, depositors, lots, timing) provide
+the rigorous foundation. This framework layers psychological interpretation on top.
+
+The chart describes archetypal fields of POTENTIAL, not fixed outcomes.
+Write in SECOND PERSON ("you may find..." not "she is...").
+Use INVITATIONAL language: "suggests," "may," "the potential here is," "you might notice."
+The math gives moderate certainty about where potential lives.
+The narrative offers that potential as an invitation to recognize — not a verdict.
+
+Use psychological frameworks as the language:
 - Attachment theory (secure, anxious, avoidant, disorganized patterns)
 - Jungian individuation and shadow work
 - Internal Family Systems (exiles, managers, firefighters)
 - Developmental psychology and formative imprints
 - Defense mechanisms and coping strategies
-- Cognitive-behavioral patterns
 
-Speak about patterns of experience: how this person takes in the world,
-what feels safe, where they overcompensate, what they project onto others,
-where their blind spots live, what strengths they undervalue.""",
+INCLUDE OUTER PLANET ARCHETYPES (Uranus, Neptune, Pluto):
+Weave their themes as psychological patterns, not astro terms.
+- Pluto: transformation, power dynamics, depth, intensity
+- Neptune: idealization, confusion, transcendence, dissolution of boundaries
+- Uranus: disruption, innovation, unconventional patterns, sudden insight
+
+KEY INTERPRETATION RULE: Dignity score drives narrative weight more than ASC archetype.
+Lead with the STRONGEST planet's lived experience, not ASC cookbook.
+
+NARRATIVE RULES:
+- NO astro jargon in the narrative (save for Technical appendix)
+- Pure human experience language
+- Rigorous technique → illuminated possibility → space for agency""",
     },
     "deterministic": {
         "label": "Deterministic (GTEI)",
         "description": "Necessitated unfolding through Absolute Self-Consistency.",
         "instructions": """FRAMEWORK: DETERMINISTIC (GTEI)
+
+BASELINE: Hellenistic techniques provide the rigorous foundation.
+
 The chart is a necessitated expression of Absolute Self-Consistency (ASC).
 Every placement is the only possible configuration — the singular,
 self-consistent solution to this person's coherence equation.
@@ -1828,33 +2147,66 @@ coherent pathway from this person's internal potentials.
 
 End with a human-readable synthesis and one coherence-aiding question.""",
     },
-    "hellenistic": {
-        "label": "Hellenistic",
-        "description": "Traditional techniques: sect, dignity, lots, timing. Vettius Valens lineage.",
-        "instructions": """FRAMEWORK: HELLENISTIC TRADITIONAL
-Interpret through the lens of classical Hellenistic astrology.
+    "ki": {
+        "label": "9 Star Ki",
+        "description": "Ki elemental cycles: Essence, Emotion, Life Path.",
+        "instructions": """FRAMEWORK: 9 STAR KI
 
-Priority techniques:
-- Sect (day/night chart — benefic/malefic modulation)
-- Essential dignities (domicile, exaltation, triplicity, term, face)
-- The lots (Fortune for body/material, Spirit for mind/purpose)
-- Profections (annual, monthly)
-- Zodiacal Releasing (Spirit for career/purpose, Fortune for material)
-- Derivative houses (Pelletier system — house-to-house relationships)
-- Depositor chains and final dispositor
-- Reception between planets
+BASELINE: Can integrate with natal chart or stand alone.
 
-Emphasize what the tradition emphasizes: the condition of the planet matters
-more than what sign it's in. A well-dignified Saturn is better than a
-peregrine Jupiter. Context over cookbook.
+The three Ki numbers reveal:
 
-Voice: Scholarly but accessible. In the lineage of Vettius Valens, Firmicus,
-and Chris Brennan's modern synthesis.""",
+1ST NUMBER (ESSENCE): The iceberg below the water — invisible to self.
+Governs the parts of ourselves we can't see. Works in conjunction with
+natal chart hidden elements. What operates beneath conscious awareness.
+
+2ND NUMBER (EMOTION): Internal processing, the heart, qualities/abilities,
+strengths/weaknesses, potential trauma triggers. Under stress, we resort
+to the SHADOW QUALITIES of this number. Connects to Moon themes.
+
+3RD NUMBER (LIFE PATH): How people see you externally + contextualizes
+the nodes, career, societal roles, larger lessons. The mirror we must
+see through on our journey. Connects to nodal story and career arc.
+
+ELEMENTAL RELATIONSHIPS:
+- Productive cycle: Wood → Fire → Earth → Metal → Water → Wood
+- Controlling cycle: Wood → Earth → Water → Fire → Metal → Wood
+
+Integrate Ki with natal chart themes where applicable.
+Use invitational language for the Psychological aspects.""",
+    },
+    "zr": {
+        "label": "Zodiacal Releasing",
+        "description": "Life chapters, peak periods, timing. Vettius Valens lineage.",
+        "instructions": """FRAMEWORK: ZODIACAL RELEASING
+
+BASELINE: Hellenistic techniques provide the rigorous foundation.
+ZR is a timing technique from Vettius Valens' Anthology.
+
+Interpret through the lens of LIFE CHAPTERS:
+- L1 periods: Major life chapters (years to decades)
+- L2 periods: Sub-chapters within L1
+- Peak periods: Signs angular from Lot of Fortune (1st/10th = Major, 7th = Moderate, 4th = Minor)
+  indicate heightened activity and manifestation. Peaks are ALWAYS from Fortune.
+- Loosing of the bond: Transition points, pivots, unexpected shifts
+
+NON-DETERMINISTIC REFRAME:
+- Peak periods = windows of momentum, not guaranteed success
+- Malefic periods = growth edges, not doom
+- Loosing of the bond = pivot points, not fate's interruption
+- Sect malefic activation = where your work is, not where you lose
+
+ZR as navigation tool, not fortune-telling. Timing precision + agency of response.
+
+Voice: Grounded in tradition but emphasizing choice within timing.""",
     },
     "stoic": {
         "label": "Stoic",
         "description": "Virtue, fate, and the discipline of assent. Marcus Aurelius meets the chart.",
         "instructions": """FRAMEWORK: STOIC
+
+BASELINE: Hellenistic techniques provide the rigorous foundation.
+
 Read the chart through Stoic philosophy. What is "up to us" (prohairesis)
 and what is not? The chart shows both the given conditions (fate, heimarmenē)
 and the capacity for virtue within those conditions.
@@ -1871,32 +2223,90 @@ dispreferred indifferents. The view from above.
 Quote the Stoics where fitting: Marcus Aurelius, Epictetus, Seneca.
 The chart is not a cage — it's the specific arena in which virtue is practiced.
 
-Voice: Measured, clear-eyed, grounding. Like Meditations written for one person.""",
-    },
-    "mythological": {
-        "label": "Mythological",
-        "description": "The chart as myth. Gods, archetypes, and the hero's journey.",
-        "instructions": """FRAMEWORK: MYTHOLOGICAL
-Read the chart as a living myth. Each planet is a god or archetypal force.
-Each house is a stage in the journey. The aspects are the relationships
-between these forces — alliances, conflicts, hidden bonds.
+Voice: Measured, clear-eyed, grounding. Like Meditations written for one person.
 
-Draw from:
-- Greek/Roman mythology (the original planetary myths)
-- Joseph Campbell's monomyth (the hero's journey structure)
-- Jungian archetypes (anima/animus, shadow, self, trickster)
-- World mythology where relevant (Norse, Egyptian, Hindu parallels)
-
-The person's life is a story being told by these forces.
-What myth are they living? What chapter are they in?
-Who is the ally, who is the threshold guardian, what is the boon?
-
-Voice: Epic but intimate. Like a storyteller who knows this is YOUR story.""",
+NOTE: Knowledge base needs more Stoic texts for full support.""",
     },
 }
 
 # Legacy compatibility — PERSPECTIVES maps to the new FRAMEWORKS
 PERSPECTIVES = {k: v["instructions"] for k, v in FRAMEWORKS.items()}
+
+
+# ── Add-ons ──
+# Supplemental sections that can be appended to any report.
+# One round of selection — pick any/all, then generate.
+# If a framework was already selected (e.g., ZR framework), don't show it as add-on.
+
+ADD_ONS = {
+    "zr": {
+        "label": "+ZR",
+        "description": "Zodiacal Releasing timing section (L1/L2 chapters, peak periods)",
+    },
+    "transits": {
+        "label": "+Transits",
+        "description": "Current transits to natal chart",
+    },
+    "ki": {
+        "label": "+Ki",
+        "description": "9 Star Ki cycle section (current personal year/month)",
+    },
+}
+
+
+# ── Chart Reading Workflow ──
+# This is the canonical workflow for generating chart readings.
+# Follow these steps IN ORDER. Do not skip or reorder.
+
+WORKFLOW_PROMPT = """
+## Chart Reading Workflow
+
+### Baseline (Always Present)
+Hellenistic + Whole Sign Houses — the backbone of all readings. Sect, dignity, lots, depositors, timing techniques. This isn't a framework choice — it's how we do astrology. All frameworks layer ON TOP of this.
+
+### Step 1: Chart Selection
+Ask: "Which chart? (name one from the list, or say 'new' to create one)"
+If new → collect: Name, Date (YYYY-MM-DD), Time (HH:MM), Location
+
+### Step 2: Type (output format)
+Ask: "What type of reading?"
+- Technical — math first, full astrological architecture, astro jargon fine
+- Narrative — portrait first, NO astro jargon in prose, math as appendix
+- Poem — pure poetry in body (NO jargon), symbolism only, appendix with technical
+- Ki — pure 9 Star Ki + I Ching, trigrams, hexagrams, elemental cycles
+
+### Step 3: Framework (interpretive lens)
+**ALWAYS ask this step, regardless of type.** Frameworks apply to ALL types.
+Ask: "Which framework(s)? You can pick multiple."
+- Psychological — attachment, shadow, IFS, developmental, non-deterministic
+- GTEI — Absolute Self-Consistency, 5 Primordial Categories, deterministic
+- Ki — blend Ki pattern INTO interpretation (Essence→identity, Emotion→Moon, Life Path→nodes)
+- ZR — Zodiacal Releasing as primary timing lens
+- Stoic — virtue, fate, dichotomy of control
+
+### Step 4: Size
+Ask: "What size?"
+- XS — 3-5 sentences
+- S — 2-3 paragraphs
+- M — 1-2 pages
+- L — 3-5 pages
+- XL — 5-10+ pages
+
+### Step 5: Add-ons
+Ask: "Any add-ons? (ZR section, Transits, Ki cycle) Or ready to generate?"
+Don't offer an add-on if it's already selected as framework.
+
+### Step 6: Generate
+Confirm the full spec, then generate.
+
+### Rules
+1. No astro jargon in Narrative/Poem body — pure psychology, behavior, felt experience
+2. Non-deterministic language (unless GTEI) — "may," "likely," "suggests"
+3. Second person — "you" not "they"
+4. Technical appendix at END (except for Technical type)
+5. Each reading must be unique — NO recycling phrases or structures
+6. Dignity score drives narrative weight more than ASC archetype
+"""
 
 
 # ── Whole Sign Houses ──
