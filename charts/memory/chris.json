@@ -1,0 +1,234 @@
+{
+  "insights": [
+    {
+      "id": "7b3c41ce",
+      "timestamp": "2026-02-14T22:17:43.020477+00:00",
+      "type": "insight",
+      "content": "Saturn-Neptune at 0\u00b0 Aries exactly on Sun/Moon midpoint (0.04\u00b0 orb) \u2014 something core to identity surfacing at the most public point in the zodiac. Structure and dissolution arriving together. The Sabian (woman risen from the sea) perfectly captures the emergence theme.",
+      "techniques": [
+        "midpoints",
+        "transits",
+        "sabian"
+      ],
+      "placements": [
+        "Saturn=Sun/Moon",
+        "Neptune=Sun/Moon"
+      ],
+      "rating": 5,
+      "source": "reading",
+      "reading_ref": "chris_transit_synthesis_20260214.md",
+      "validated": false,
+      "tags": [
+        "identity",
+        "emergence",
+        "public"
+      ]
+    },
+    {
+      "id": "32f45dc7",
+      "timestamp": "2026-02-14T22:17:50.929535+00:00",
+      "type": "insight",
+      "content": "SA Venus opposing natal Mars (0.09\u00b0) \u2014 love/beauty confronting the exalted creative engine. Venus says 'for whom?' and Mars has no answer yet. SA Venus simultaneously trining Jupiter (0.22\u00b0) \u2014 the faith center supports the softening. This is the central direction of the year.",
+      "techniques": [
+        "solar_arc",
+        "dignities"
+      ],
+      "placements": [
+        "SA Venus opp natal Mars",
+        "SA Venus trine natal Jupiter"
+      ],
+      "rating": 5,
+      "source": "reading",
+      "reading_ref": "chris_transit_synthesis_20260214.md",
+      "validated": false,
+      "tags": [
+        "love",
+        "power",
+        "creative",
+        "year_theme"
+      ]
+    },
+    {
+      "id": "c4798e2e",
+      "timestamp": "2026-02-14T22:17:58.600531+00:00",
+      "type": "insight",
+      "content": "Uranus on Moon/Venus midpoint (0.03\u00b0) at the MC \u2014 the emotional-romantic axis being rewired in public/career. Sabian: a woman past her change of life experiences new love. Love arriving through recognition, not biology.",
+      "techniques": [
+        "midpoints",
+        "transits",
+        "sabian"
+      ],
+      "placements": [
+        "Uranus=Moon/Venus",
+        "Uranus conj MC"
+      ],
+      "rating": 5,
+      "source": "reading",
+      "reading_ref": "chris_transit_synthesis_20260214.md",
+      "validated": false,
+      "tags": [
+        "love",
+        "career",
+        "disruption"
+      ]
+    },
+    {
+      "id": "41c10ff0",
+      "timestamp": "2026-02-14T22:18:05.819104+00:00",
+      "type": "insight",
+      "content": "SA Mercury conjunct MC at 29\u00b0 Taurus (0.31\u00b0) \u2014 the directed mind arriving at career culmination at the anaretic degree. Urgency to articulate. Sabian: peacock parading before its admiring mate. Earned mastery shown to someone who sees.",
+      "techniques": [
+        "solar_arc",
+        "sabian"
+      ],
+      "placements": [
+        "SA Mercury conj MC"
+      ],
+      "rating": 4,
+      "source": "reading",
+      "reading_ref": "chris_transit_synthesis_20260214.md",
+      "validated": false,
+      "tags": [
+        "career",
+        "communication",
+        "mastery"
+      ]
+    },
+    {
+      "id": "4467cba9",
+      "timestamp": "2026-02-14T22:18:14.085754+00:00",
+      "type": "insight",
+      "content": "SA Pluto = Saturn/Uranus midpoint (0.02\u00b0) \u2014 the deepest transformation happening silently: the old negotiation between structure and revolution being rebuilt from the root. The compromise that held for years is dissolving.",
+      "techniques": [
+        "solar_arc",
+        "midpoints"
+      ],
+      "placements": [
+        "SA Pluto = Saturn/Uranus"
+      ],
+      "rating": 4,
+      "source": "reading",
+      "reading_ref": "chris_transit_synthesis_20260214.md",
+      "validated": false,
+      "tags": [
+        "transformation",
+        "structure",
+        "revolution"
+      ]
+    },
+    {
+      "id": "1dcea85c",
+      "timestamp": "2026-02-14T22:18:22.176931+00:00",
+      "type": "insight",
+      "content": "Jupiter absent from tight natal midpoint pictures \u2014 the final dispositor receives all depositor chains but isn't in the wiring. Jupiter is what the wiring SERVES, not part of the mechanism. The destination, not the road.",
+      "techniques": [
+        "midpoints",
+        "dignities",
+        "depositors"
+      ],
+      "placements": [
+        "Jupiter 7H domicile final dispositor"
+      ],
+      "rating": 5,
+      "source": "reading",
+      "reading_ref": "chris_synthesis_midpoints.md",
+      "validated": true,
+      "tags": [
+        "identity",
+        "architecture",
+        "jupiter"
+      ]
+    }
+  ],
+  "technique_scores": {
+    "midpoints": {
+      "hits": 4,
+      "resonance_sum": 19
+    },
+    "transits": {
+      "hits": 2,
+      "resonance_sum": 10
+    },
+    "sabian": {
+      "hits": 3,
+      "resonance_sum": 14
+    },
+    "solar_arc": {
+      "hits": 3,
+      "resonance_sum": 13
+    },
+    "dignities": {
+      "hits": 2,
+      "resonance_sum": 10
+    },
+    "depositors": {
+      "hits": 1,
+      "resonance_sum": 5
+    }
+  },
+  "placement_memory": {
+    "Saturn=Sun/Moon": {
+      "first_noted": "2026-02-14",
+      "times_referenced": 1,
+      "insights": [
+        "Saturn-Neptune at 0\u00b0 Aries exactly on Sun/Moon midpoint (0.04\u00b0 orb) \u2014 something core to identity surfacing at the most public point in the zodiac. Structure and dissolution arriving together. The Sabi"
+      ]
+    },
+    "Neptune=Sun/Moon": {
+      "first_noted": "2026-02-14",
+      "times_referenced": 1,
+      "insights": [
+        "Saturn-Neptune at 0\u00b0 Aries exactly on Sun/Moon midpoint (0.04\u00b0 orb) \u2014 something core to identity surfacing at the most public point in the zodiac. Structure and dissolution arriving together. The Sabi"
+      ]
+    },
+    "SA Venus opp natal Mars": {
+      "first_noted": "2026-02-14",
+      "times_referenced": 1,
+      "insights": [
+        "SA Venus opposing natal Mars (0.09\u00b0) \u2014 love/beauty confronting the exalted creative engine. Venus says 'for whom?' and Mars has no answer yet. SA Venus simultaneously trining Jupiter (0.22\u00b0) \u2014 the fai"
+      ]
+    },
+    "SA Venus trine natal Jupiter": {
+      "first_noted": "2026-02-14",
+      "times_referenced": 1,
+      "insights": [
+        "SA Venus opposing natal Mars (0.09\u00b0) \u2014 love/beauty confronting the exalted creative engine. Venus says 'for whom?' and Mars has no answer yet. SA Venus simultaneously trining Jupiter (0.22\u00b0) \u2014 the fai"
+      ]
+    },
+    "Uranus=Moon/Venus": {
+      "first_noted": "2026-02-14",
+      "times_referenced": 1,
+      "insights": [
+        "Uranus on Moon/Venus midpoint (0.03\u00b0) at the MC \u2014 the emotional-romantic axis being rewired in public/career. Sabian: a woman past her change of life experiences new love. Love arriving through recogn"
+      ]
+    },
+    "Uranus conj MC": {
+      "first_noted": "2026-02-14",
+      "times_referenced": 1,
+      "insights": [
+        "Uranus on Moon/Venus midpoint (0.03\u00b0) at the MC \u2014 the emotional-romantic axis being rewired in public/career. Sabian: a woman past her change of life experiences new love. Love arriving through recogn"
+      ]
+    },
+    "SA Mercury conj MC": {
+      "first_noted": "2026-02-14",
+      "times_referenced": 1,
+      "insights": [
+        "SA Mercury conjunct MC at 29\u00b0 Taurus (0.31\u00b0) \u2014 the directed mind arriving at career culmination at the anaretic degree. Urgency to articulate. Sabian: peacock parading before its admiring mate. Earned"
+      ]
+    },
+    "SA Pluto = Saturn/Uranus": {
+      "first_noted": "2026-02-14",
+      "times_referenced": 1,
+      "insights": [
+        "SA Pluto = Saturn/Uranus midpoint (0.02\u00b0) \u2014 the deepest transformation happening silently: the old negotiation between structure and revolution being rebuilt from the root. The compromise that held fo"
+      ]
+    },
+    "Jupiter 7H domicile final dispositor": {
+      "first_noted": "2026-02-14",
+      "times_referenced": 1,
+      "insights": [
+        "Jupiter absent from tight natal midpoint pictures \u2014 the final dispositor receives all depositor chains but isn't in the wiring. Jupiter is what the wiring SERVES, not part of the mechanism. The destin"
+      ]
+    }
+  }
+}

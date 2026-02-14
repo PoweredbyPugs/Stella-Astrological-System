@@ -785,6 +785,8 @@ async def discover_and_register():
 
 CHARTS_DIR = STELLA_DIR / "charts"
 CHARTS_DIR.mkdir(exist_ok=True)
+MEMORY_DIR = CHARTS_DIR / "memory"
+MEMORY_DIR.mkdir(exist_ok=True)
 
 
 def _load_local_chart(name: str) -> dict | None:
@@ -3577,6 +3579,332 @@ async def discover(name: str, top: int = 10) -> str:
         pass
 
     return json.dumps(findings, indent=2)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SECTION 8: REFLECT & RECALL — Learning Memory System
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Selection + Memory for the emergent system.
+# reflect() stores validated insights. recall() retrieves them.
+# Each chart accumulates a living interpretive layer over time.
+#
+# Memory structure (charts/memory/{name}.json):
+# {
+#   "insights": [
+#     {
+#       "id": "uuid",
+#       "timestamp": "ISO-8601",
+#       "type": "insight|prediction|technique|life_event|feedback",
+#       "content": "The actual insight text",
+#       "techniques": ["midpoints", "solar_arc", "sabian"],
+#       "placements": ["SA Venus opp natal Mars", "Saturn=Sun/Moon"],
+#       "rating": 1-5 (how much it resonated),
+#       "source": "reading|discover|manual|transit",
+#       "reading_ref": "optional filename of source reading",
+#       "validated": true/false (confirmed by lived experience),
+#       "tags": ["love", "career", "identity"]
+#     }
+#   ],
+#   "technique_scores": {
+#     "midpoints": {"hits": 12, "resonance_sum": 45},
+#     "solar_arc": {"hits": 8, "resonance_sum": 35},
+#     ...
+#   },
+#   "placement_memory": {
+#     "SA Venus opp natal Mars": {
+#       "first_noted": "2026-02-14",
+#       "times_referenced": 3,
+#       "best_insight": "love meeting power — the engine confronted by softness"
+#     }
+#   }
+# }
+
+
+def _load_chart_memory(name: str) -> dict:
+    """Load or initialize a chart's memory file."""
+    path = MEMORY_DIR / f"{name.lower()}.json"
+    if path.exists():
+        return json.loads(path.read_text())
+    return {"insights": [], "technique_scores": {}, "placement_memory": {}}
+
+
+def _save_chart_memory(name: str, memory: dict):
+    """Save a chart's memory file."""
+    path = MEMORY_DIR / f"{name.lower()}.json"
+    path.write_text(json.dumps(memory, indent=2))
+
+
+def _generate_id() -> str:
+    """Generate a short unique ID."""
+    import hashlib
+    return hashlib.md5(
+        f"{datetime.now(timezone.utc).isoformat()}{random.random()}".encode()
+    ).hexdigest()[:8]
+
+
+@mcp.tool()
+def reflect(
+    name: str,
+    content: str,
+    insight_type: str = "insight",
+    techniques: Optional[str] = None,
+    placements: Optional[str] = None,
+    rating: Optional[int] = None,
+    source: str = "manual",
+    reading_ref: Optional[str] = None,
+    validated: bool = False,
+    tags: Optional[str] = None,
+) -> str:
+    """Store a validated insight, prediction, or life event for a chart.
+
+    This is how the system learns. Every time a reading resonates, a prediction
+    lands, or a life event confirms a pattern — reflect it. Over time, the
+    chart's memory builds a living interpretive layer.
+
+    Args:
+        name: Chart name (e.g. 'chris', 'lisa')
+        content: The insight, prediction, or event description
+        insight_type: One of: insight, prediction, technique, life_event, feedback
+        techniques: Comma-separated techniques used (e.g. 'midpoints,solar_arc,sabian')
+        placements: Comma-separated placements involved (e.g. 'SA Venus opp Mars,Saturn=Sun/Moon')
+        rating: 1-5 how strongly it resonated (5 = profound)
+        source: Where this came from: reading, discover, manual, transit
+        reading_ref: Optional filename of the source reading
+        validated: Whether this has been confirmed by lived experience
+        tags: Comma-separated topic tags (e.g. 'love,career,identity')
+    """
+    memory = _load_chart_memory(name)
+
+    tech_list = [t.strip() for t in techniques.split(",")] if techniques else []
+    place_list = [p.strip() for p in placements.split(",")] if placements else []
+    tag_list = [t.strip() for t in tags.split(",")] if tags else []
+
+    entry = {
+        "id": _generate_id(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "type": insight_type,
+        "content": content,
+        "techniques": tech_list,
+        "placements": place_list,
+        "rating": rating,
+        "source": source,
+        "reading_ref": reading_ref,
+        "validated": validated,
+        "tags": tag_list,
+    }
+
+    memory["insights"].append(entry)
+
+    # Update technique scores
+    if rating and tech_list:
+        for tech in tech_list:
+            if tech not in memory["technique_scores"]:
+                memory["technique_scores"][tech] = {"hits": 0, "resonance_sum": 0}
+            memory["technique_scores"][tech]["hits"] += 1
+            memory["technique_scores"][tech]["resonance_sum"] += rating
+
+    # Update placement memory
+    for placement in place_list:
+        if placement not in memory["placement_memory"]:
+            memory["placement_memory"][placement] = {
+                "first_noted": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                "times_referenced": 0,
+                "insights": [],
+            }
+        pm = memory["placement_memory"][placement]
+        pm["times_referenced"] += 1
+        if rating and rating >= 4:
+            pm["insights"].append(content[:200])  # Store abbreviated high-resonance insights
+
+    _save_chart_memory(name, memory)
+
+    # Summary
+    total = len(memory["insights"])
+    top_tech = None
+    if memory["technique_scores"]:
+        top_tech = max(memory["technique_scores"].items(),
+                       key=lambda x: x[1]["resonance_sum"] / max(x[1]["hits"], 1))
+
+    return json.dumps({
+        "status": "stored",
+        "id": entry["id"],
+        "total_insights": total,
+        "top_technique": {
+            "name": top_tech[0],
+            "avg_resonance": round(top_tech[1]["resonance_sum"] / top_tech[1]["hits"], 1),
+            "total_hits": top_tech[1]["hits"],
+        } if top_tech else None,
+    }, indent=2)
+
+
+@mcp.tool()
+def recall(
+    name: str,
+    query: Optional[str] = None,
+    insight_type: Optional[str] = None,
+    technique: Optional[str] = None,
+    tag: Optional[str] = None,
+    min_rating: Optional[int] = None,
+    validated_only: bool = False,
+    limit: int = 20,
+) -> str:
+    """Recall stored insights for a chart. The system's memory.
+
+    Search and filter the chart's accumulated insights, validated patterns,
+    and technique effectiveness scores. Use before generating readings to
+    build on what's already been learned.
+
+    Args:
+        name: Chart name
+        query: Text search across insight content
+        insight_type: Filter by type (insight/prediction/technique/life_event/feedback)
+        technique: Filter by technique used
+        tag: Filter by tag
+        min_rating: Minimum resonance rating (1-5)
+        validated_only: Only show confirmed insights
+        limit: Max results to return
+    """
+    memory = _load_chart_memory(name)
+
+    results = memory["insights"]
+
+    # Apply filters
+    if insight_type:
+        results = [r for r in results if r.get("type") == insight_type]
+    if technique:
+        results = [r for r in results if technique in r.get("techniques", [])]
+    if tag:
+        results = [r for r in results if tag in r.get("tags", [])]
+    if min_rating:
+        results = [r for r in results if (r.get("rating") or 0) >= min_rating]
+    if validated_only:
+        results = [r for r in results if r.get("validated")]
+    if query:
+        q = query.lower()
+        results = [r for r in results if q in r.get("content", "").lower()]
+
+    # Most recent first
+    results = sorted(results, key=lambda x: x.get("timestamp", ""), reverse=True)
+    results = results[:limit]
+
+    return json.dumps({
+        "name": name,
+        "total_stored": len(memory["insights"]),
+        "filtered_count": len(results),
+        "technique_scores": memory.get("technique_scores", {}),
+        "placement_memory": memory.get("placement_memory", {}),
+        "insights": results,
+    }, indent=2)
+
+
+@mcp.tool()
+def validate(name: str, insight_id: str, confirmed: bool = True, note: Optional[str] = None) -> str:
+    """Mark an insight as validated (or invalidated) by lived experience.
+
+    The feedback loop: predictions and insights get confirmed or denied
+    by what actually happens. This is how the system learns what works.
+
+    Args:
+        name: Chart name
+        insight_id: The ID of the insight to validate
+        confirmed: True if confirmed, False if invalidated
+        note: Optional note about what happened
+    """
+    memory = _load_chart_memory(name)
+
+    for insight in memory["insights"]:
+        if insight.get("id") == insight_id:
+            insight["validated"] = confirmed
+            insight["validation_date"] = datetime.now(timezone.utc).isoformat()
+            if note:
+                insight["validation_note"] = note
+
+            # Boost or penalize technique scores based on validation
+            multiplier = 1.5 if confirmed else 0.5
+            for tech in insight.get("techniques", []):
+                if tech in memory["technique_scores"]:
+                    current = memory["technique_scores"][tech]
+                    # Adjust resonance based on real-world confirmation
+                    rating = insight.get("rating", 3)
+                    adjusted = rating * multiplier
+                    current["resonance_sum"] += (adjusted - rating)
+
+            _save_chart_memory(name, memory)
+
+            return json.dumps({
+                "status": "validated" if confirmed else "invalidated",
+                "insight_id": insight_id,
+                "content": insight["content"][:100],
+                "techniques_affected": insight.get("techniques", []),
+            }, indent=2)
+
+    return json.dumps({"error": f"Insight '{insight_id}' not found for chart '{name}'"})
+
+
+@mcp.tool()
+def chart_memory_stats(name: str) -> str:
+    """Get memory statistics for a chart — what's been learned, what techniques work best.
+
+    Shows technique effectiveness rankings, total insights, validation rates,
+    and the most-referenced placements. Use this to understand what the system
+    has learned about a particular chart over time.
+
+    Args:
+        name: Chart name
+    """
+    memory = _load_chart_memory(name)
+
+    insights = memory["insights"]
+    total = len(insights)
+    validated = sum(1 for i in insights if i.get("validated"))
+    avg_rating = (sum(i.get("rating", 0) for i in insights if i.get("rating")) /
+                  max(sum(1 for i in insights if i.get("rating")), 1))
+
+    # Technique rankings by average resonance
+    tech_rankings = []
+    for tech, scores in memory.get("technique_scores", {}).items():
+        avg = scores["resonance_sum"] / max(scores["hits"], 1)
+        tech_rankings.append({
+            "technique": tech,
+            "avg_resonance": round(avg, 2),
+            "total_hits": scores["hits"],
+        })
+    tech_rankings.sort(key=lambda x: x["avg_resonance"], reverse=True)
+
+    # Most referenced placements
+    top_placements = sorted(
+        memory.get("placement_memory", {}).items(),
+        key=lambda x: x[1]["times_referenced"],
+        reverse=True
+    )[:10]
+
+    # Type distribution
+    type_counts = {}
+    for i in insights:
+        t = i.get("type", "unknown")
+        type_counts[t] = type_counts.get(t, 0) + 1
+
+    # Tag cloud
+    tag_counts = {}
+    for i in insights:
+        for tag in i.get("tags", []):
+            tag_counts[tag] = tag_counts.get(tag, 0) + 1
+
+    return json.dumps({
+        "name": name,
+        "total_insights": total,
+        "validated_count": validated,
+        "validation_rate": f"{validated/max(total,1)*100:.0f}%",
+        "avg_resonance": round(avg_rating, 1),
+        "technique_rankings": tech_rankings,
+        "top_placements": [
+            {"placement": k, "times_referenced": v["times_referenced"],
+             "top_insight": v.get("insights", [""])[0] if v.get("insights") else ""}
+            for k, v in top_placements
+        ],
+        "type_distribution": type_counts,
+        "tag_cloud": dict(sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)),
+    }, indent=2)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
