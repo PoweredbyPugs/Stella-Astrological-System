@@ -29,7 +29,10 @@ from mcp.server.fastmcp import FastMCP
 
 # ── Config ──
 STELLA_DIR = Path(__file__).parent
-CHROMA_DIR = STELLA_DIR.parent / "astro-knowledge" / "chromadb_store"
+# Look for chromadb_store in repo first, then fall back to astro-knowledge sibling
+CHROMA_DIR = STELLA_DIR / "chromadb_store"
+if not CHROMA_DIR.exists():
+    CHROMA_DIR = STELLA_DIR.parent / "astro-knowledge" / "chromadb_store"
 COLLECTION_NAME = "astro_knowledge"
 EMBEDDING_MODEL = "text-embedding-3-large"
 SWEPH_API_BASE = os.environ.get("SWEPH_API_BASE", "http://baratie:3000")
@@ -386,33 +389,72 @@ async def get_zr_report(
 
 @mcp.tool()
 async def get_ki(
+    name: Optional[str] = None,
     date: Optional[str] = None,
     birth_date: Optional[str] = None,
 ) -> str:
     """Calculate 9 Star Ki numbers for a date.
 
     Returns the three Ki numbers (year.month.third) using the Lo Shu
-    Flying Star method.
+    Flying Star method. When a chart name or birth_date is provided,
+    includes personal year/month cycle (Lo Shu palace position).
 
     Args:
-        date: Target date YYYY-MM-DD (default: today) - for transiting Ki
+        name: Chart name - auto-loads birth date for personal cycle
+        date: Target date YYYY-MM-DD (default: today)
         birth_date: Birth date YYYY-MM-DD - for natal Ki profile
     
-    Returns either transiting Ki for a date or natal Ki profile.
+    Returns global Ki + personal cycle when birth info available.
     """
     from datetime import date as date_type
-    from ki import calculate_ki, calculate_natal_ki, calculate_current_ki, format_ki_report
+    from ki import (calculate_ki, calculate_natal_ki, calculate_current_ki,
+                    format_ki_report, get_full_profile, KI_TRIGRAMS)
+    
+    # If name provided, resolve birth date from chart
+    if name and not birth_date:
+        chart_data = await call_sweph(f"/chart/{name}")
+        if isinstance(chart_data, dict) and "error" not in chart_data:
+            birth_data = chart_data.get("birthData", {})
+            bd = birth_data.get("date") or chart_data.get("birth_date") or chart_data.get("date")
+            if bd:
+                birth_date = bd
     
     if birth_date:
-        # Calculate natal Ki
+        # Full personal cycle: natal + where they are now
         bd = date_type.fromisoformat(birth_date)
-        result = calculate_natal_ki(bd)
+        td = date_type.fromisoformat(date) if date else None
+        profile = get_full_profile(bd, td)
+        natal = profile['natal']
+        cycle = profile['current_cycle']
+        
+        lines = []
+        lines.append(f"# 9 Star Ki Profile")
+        if name:
+            lines.append(f"**Chart:** {name}")
+        lines.append(f"**Birth Date:** {natal['birth_date']}")
+        lines.append("")
+        lines.append(f"## Natal Ki: {natal['sequence']}")
+        yi = natal['year_info']
+        mi = natal['month_info']
+        ti = natal['third_info']
+        lines.append(f"- Year: **{natal['ki_year']} {yi['trigram']} {yi['name']}** ({yi['element']})")
+        lines.append(f"- Month: **{natal['ki_month']} {mi['trigram']} {mi['name']}** ({mi['element']})")
+        lines.append(f"- Third: **{natal['ki_third']} {ti['trigram']} {ti['name']}** ({ti['element']})")
+        lines.append("")
+        lines.append(f"## Current Cycle ({cycle['date']})")
+        lines.append(f"**Global:** {cycle['global_year']}.{cycle['global_month']}")
+        pyi = cycle['personal_year_info']
+        pmi = cycle['personal_month_info']
+        lines.append(f"**Personal Year:** {cycle['personal_year']} {pyi['trigram']} {pyi['name']} ({pyi['element']})")
+        lines.append(f"**Personal Month:** {cycle['personal_month']} {pmi['trigram']} {pmi['name']} ({pmi['element']})")
+        
+        return "\n".join(lines)
     elif date:
-        # Calculate Ki for specific date
+        # Global Ki for specific date
         d = date_type.fromisoformat(date)
         result = calculate_current_ki(d)
     else:
-        # Calculate current Ki
+        # Global Ki for today
         result = calculate_current_ki()
     
     report = format_ki_report(result)
