@@ -16,9 +16,11 @@ Components:
 import os
 import sys
 import json
+import math
 import random
 from pathlib import Path
 from typing import Optional
+from datetime import datetime, timezone
 from urllib.parse import urlencode
 
 import httpx
@@ -3301,6 +3303,280 @@ Framework: {framework_config['label']}
     }
 
     return json.dumps(output, indent=2)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SECTION 7: DISCOVER — Emergent Pattern Detection
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Throws ALL techniques at a chart and surfaces what's interesting.
+# The data self-organizes into the reading. Variation → Selection → Memory.
+
+_SIGNS = ['Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo',
+          'Libra', 'Scorpio', 'Sagittarius', 'Capricorn', 'Aquarius', 'Pisces']
+_ASPECT_TYPES = {0: 'conjunction', 60: 'sextile', 90: 'square', 120: 'trine', 180: 'opposition'}
+
+
+def _d_lon_to_sign(lon: float) -> str:
+    return _SIGNS[int(lon / 30)]
+
+
+def _d_lon_to_display(lon: float) -> str:
+    sign = _SIGNS[int(lon / 30)]
+    deg = lon % 30
+    return f"{int(deg)}°{int((deg % 1) * 60):02d}' {sign}"
+
+
+def _d_aspect_between(lon1: float, lon2: float, orb_limit: float = 2.0):
+    diff = abs(lon1 - lon2) % 360
+    if diff > 180:
+        diff = 360 - diff
+    for asp_deg, asp_name in _ASPECT_TYPES.items():
+        orb = abs(diff - asp_deg)
+        if orb <= orb_limit:
+            return (asp_name, orb)
+    return None
+
+
+def _d_midpoint_90(lon1: float, lon2: float):
+    l1, l2 = lon1 % 90, lon2 % 90
+    near = (l1 + l2) / 2
+    far = (near + 45) % 90
+    return near, far
+
+
+def _d_midpoint_orb_90(test_lon: float, mp: float) -> float:
+    t = test_lon % 90
+    diff = abs(t - mp)
+    if diff > 45:
+        diff = 90 - diff
+    return diff
+
+
+def _d_solar_arc(birth_date: str) -> float:
+    parts = birth_date.split('-')
+    birth = datetime(int(parts[0]), int(parts[1]), int(parts[2]), tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    return (now - birth).days / 365.25 * 0.9856
+
+
+def _discover_patterns(chart_data: dict, transit_data: dict) -> dict:
+    """Run all techniques and rank convergences."""
+    natal_planets = {}
+    birth_date = chart_data.get("birthDate", chart_data.get("date", "1986-05-01"))
+
+    for p in chart_data.get("planets", []):
+        name = p.get("name", "")
+        lon = p.get("longitude")
+        if lon is not None:
+            natal_planets[name] = {
+                "longitude": float(lon),
+                "sign": p.get("sign", _d_lon_to_sign(float(lon))),
+                "house": p.get("house"),
+                "dignity_score": p.get("dignityScore", p.get("dignity_score")),
+            }
+
+    for key in ["ascendant", "midheaven"]:
+        angle = chart_data.get(key, chart_data.get("angles", {}).get(key))
+        if angle:
+            lon = float(angle.get("longitude", angle) if isinstance(angle, dict) else angle)
+            label = "ASC" if "asc" in key.lower() else "MC"
+            natal_planets[label] = {"longitude": lon, "sign": _d_lon_to_sign(lon),
+                                     "house": 1 if label == "ASC" else 10}
+
+    transit_positions = {}
+    transits_list = transit_data if isinstance(transit_data, list) else transit_data.get("transits", [])
+    seen = set()
+    for t in transits_list:
+        tp = t.get("transit", {})
+        name = tp.get("planet", "")
+        if name and name not in seen:
+            seen.add(name)
+            sign = tp.get("sign", "Aries")
+            deg = float(tp.get("degree", 0))
+            sign_idx = _SIGNS.index(sign) if sign in _SIGNS else 0
+            transit_positions[name] = {
+                "longitude": sign_idx * 30 + deg, "sign": sign, "degree": deg,
+                "isRetrograde": tp.get("isRetrograde", False),
+            }
+
+    solar_arc = _d_solar_arc(birth_date)
+    sa_positions = {}
+    for name, info in natal_planets.items():
+        sa_lon = (info["longitude"] + solar_arc) % 360
+        sa_positions[name] = {"longitude": sa_lon, "sign": _d_lon_to_sign(sa_lon),
+                               "display": _d_lon_to_display(sa_lon)}
+
+    natal_names = list(natal_planets.keys())
+    midpoints = []
+    for i in range(len(natal_names)):
+        for j in range(i + 1, len(natal_names)):
+            n1, n2 = natal_names[i], natal_names[j]
+            near, far = _d_midpoint_90(natal_planets[n1]["longitude"], natal_planets[n2]["longitude"])
+            midpoints.append({"pair": f"{n1}/{n2}", "mp": near})
+            midpoints.append({"pair": f"{n1}/{n2}", "mp": far})
+
+    findings = {
+        "solar_arc_degrees": round(solar_arc, 2),
+        "transit_to_midpoint": [], "solar_arc_aspects": [],
+        "solar_arc_to_midpoint": [], "transit_aspects_tight": [],
+        "convergence_zones": [],
+    }
+
+    # Transit planets → natal midpoints (orb < 1.5°)
+    for t_name, t_info in transit_positions.items():
+        for mp in midpoints:
+            orb = _d_midpoint_orb_90(t_info["longitude"], mp["mp"])
+            if orb < 1.5:
+                findings["transit_to_midpoint"].append({
+                    "transit": t_name, "transit_pos": _d_lon_to_display(t_info["longitude"]),
+                    "retrograde": t_info.get("isRetrograde", False),
+                    "midpoint": mp["pair"], "orb": round(orb, 2),
+                })
+
+    # SA aspects → natal (orb < 2°)
+    for sa_name, sa_info in sa_positions.items():
+        for n_name, n_info in natal_planets.items():
+            if sa_name == n_name:
+                continue
+            result = _d_aspect_between(sa_info["longitude"], n_info["longitude"], 2.0)
+            if result:
+                findings["solar_arc_aspects"].append({
+                    "sa_planet": sa_name, "sa_pos": sa_info["display"],
+                    "aspect": result[0], "natal_planet": n_name,
+                    "natal_pos": _d_lon_to_display(n_info["longitude"]),
+                    "natal_house": n_info.get("house"), "orb": round(result[1], 2),
+                })
+
+    # SA → natal midpoints (orb < 1.5°)
+    for sa_name, sa_info in sa_positions.items():
+        for mp in midpoints:
+            orb = _d_midpoint_orb_90(sa_info["longitude"], mp["mp"])
+            if orb < 1.5:
+                pair_parts = mp["pair"].split("/")
+                if sa_name in pair_parts:
+                    continue
+                findings["solar_arc_to_midpoint"].append({
+                    "sa_planet": sa_name, "sa_pos": sa_info["display"],
+                    "midpoint": mp["pair"], "orb": round(orb, 2),
+                })
+
+    # Tight transit aspects (orb < 1°)
+    for t in transits_list:
+        orb = float(t.get("orb", 99))
+        if orb > 1.0:
+            continue
+        tp = t.get("transit", {})
+        np = t.get("natal", t.get("natalPoint", {}))
+        findings["transit_aspects_tight"].append({
+            "transit": tp.get("planet", "?"),
+            "transit_pos": f"{tp.get('degree', '?')}° {tp.get('sign', '?')}",
+            "retrograde": tp.get("isRetrograde", False),
+            "aspect": t.get("aspect", "?"), "natal": np.get("planet", np.get("name", "?")),
+            "natal_house": np.get("house"), "orb": round(orb, 2),
+            "is_lord_of_year": t.get("isToLordOfYear", False),
+        })
+
+    # Convergence zones — cluster all active points into 5° bins
+    all_pts = []
+    for item in findings["transit_aspects_tight"]:
+        for t_name, t_info in transit_positions.items():
+            if t_name == item["transit"]:
+                all_pts.append({"lon": t_info["longitude"],
+                                "desc": f"TR {item['transit']} {item['aspect']} natal {item['natal']}"})
+    for item in findings["solar_arc_aspects"]:
+        all_pts.append({"lon": sa_positions[item["sa_planet"]]["longitude"],
+                        "desc": f"SA {item['sa_planet']} {item['aspect']} natal {item['natal_planet']}"})
+    for item in findings["transit_to_midpoint"]:
+        if item["orb"] < 0.5:
+            for t_name, t_info in transit_positions.items():
+                if t_name == item["transit"]:
+                    all_pts.append({"lon": t_info["longitude"],
+                                    "desc": f"TR {item['transit']} = {item['midpoint']} mp"})
+    for item in findings["solar_arc_to_midpoint"]:
+        if item["orb"] < 0.5:
+            all_pts.append({"lon": sa_positions[item["sa_planet"]]["longitude"],
+                            "desc": f"SA {item['sa_planet']} = {item['midpoint']} mp"})
+
+    zone_hits = {}
+    for pt in all_pts:
+        zk = round(pt["lon"] / 5) * 5 % 360
+        if zk not in zone_hits:
+            zone_hits[zk] = {"zone": _d_lon_to_display(zk), "hits": []}
+        zone_hits[zk]["hits"].append(pt["desc"])
+
+    for zk, zd in sorted(zone_hits.items()):
+        if len(zd["hits"]) >= 2:
+            findings["convergence_zones"].append({
+                "zone": zd["zone"], "hit_count": len(zd["hits"]), "patterns": zd["hits"],
+            })
+
+    # Sort by orb
+    for key in ["transit_to_midpoint", "solar_arc_aspects", "solar_arc_to_midpoint", "transit_aspects_tight"]:
+        findings[key].sort(key=lambda x: x["orb"])
+    findings["convergence_zones"].sort(key=lambda x: x["hit_count"], reverse=True)
+
+    # Summary
+    findings["summary"] = {
+        "total_transit_midpoint_hits": len(findings["transit_to_midpoint"]),
+        "total_sa_aspects": len(findings["solar_arc_aspects"]),
+        "total_sa_midpoint_hits": len(findings["solar_arc_to_midpoint"]),
+        "total_tight_transits": len(findings["transit_aspects_tight"]),
+        "convergence_zones_found": len(findings["convergence_zones"]),
+        "top_convergence": findings["convergence_zones"][0] if findings["convergence_zones"] else None,
+        "tightest_transit_midpoint": findings["transit_to_midpoint"][0] if findings["transit_to_midpoint"] else None,
+        "tightest_sa_aspect": findings["solar_arc_aspects"][0] if findings["solar_arc_aspects"] else None,
+        "tightest_sa_midpoint": findings["solar_arc_to_midpoint"][0] if findings["solar_arc_to_midpoint"] else None,
+    }
+
+    return findings
+
+
+@mcp.tool()
+async def discover(name: str, top: int = 10) -> str:
+    """Discover what's most active in a chart RIGHT NOW.
+
+    Throws all techniques at a stored chart — transits, solar arcs, midpoints,
+    convergence zones — and surfaces the tightest, most significant patterns.
+    The data self-organizes into ranked findings.
+
+    This is the seed of emergent pattern detection: instead of asking
+    specific questions, let the chart tell you what's happening.
+
+    Args:
+        name: Name of the stored chart
+        top: Number of results per category (default 10)
+    """
+    # Load chart data
+    chart_data = _load_local_chart(name)
+    if not chart_data:
+        try:
+            chart_data = await call_sweph(f"/chart/{name}")
+        except Exception:
+            return json.dumps({"error": f"Chart '{name}' not found"})
+
+    chart_data = _normalize_legacy_chart(chart_data)
+    chart_data = _apply_whole_sign_houses(chart_data)
+
+    # Get current transits
+    try:
+        transit_data = await call_sweph(f"/transits/{name}/now")
+    except Exception as e:
+        return json.dumps({"error": f"Failed to get transits: {e}"})
+
+    # Run discovery
+    findings = _discover_patterns(chart_data, transit_data)
+
+    # Trim to top N per category
+    for key in ["transit_to_midpoint", "solar_arc_aspects", "solar_arc_to_midpoint", "transit_aspects_tight"]:
+        findings[key] = findings[key][:top]
+
+    # Add profection context
+    try:
+        findings["profections"] = await call_sweph(f"/profections/{name}")
+    except Exception:
+        pass
+
+    return json.dumps(findings, indent=2)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
