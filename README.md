@@ -1,83 +1,225 @@
 # Stella — Unified Astrology & Divination MCP Server 🌙
 
-**Repo:** [PoweredbyPugs/stella-mcp](https://github.com/PoweredbyPugs/stella-mcp)
+**Repo:** [PoweredbyPugs/Stella-mcp](https://github.com/PoweredbyPugs/Stella-mcp) (private)
 
-The Moon of Gnosis. Merges three MCP servers into a single Python server:
+The Moon of Gnosis. A single Python MCP server that unifies ephemeris computation,
+a 6,500+ chunk knowledge graph, chart reading generation, emergent pattern detection,
+and a learning memory system.
 
-1. **Helios Bridge** — 14+ ephemeris tools wrapping the Swiss Ephemeris REST API (+ auto-discovered endpoints)
-2. **Knowledge Graph** — ChromaDB-backed semantic search across 6,500+ chunks from 26 astrological texts
-3. **Chart Reading System** — 3-axis report generation (Type × Framework × Size = 75 combinations)
-4. **I Ching / Gnostic** — Hexagram casting (King Wen sequence) and wisdom retrieval
+## Quick Start
+
+```bash
+git clone https://github.com/PoweredbyPugs/Stella-mcp.git stella
+cd stella
+bash setup.sh
+```
+
+See [SETUP.md](SETUP.md) for detailed instructions.
+
+---
+
+## Architecture
+
+Stella has 8 core sections, each building on the last:
+
+```
+┌─────────────────────────────────────────────────────┐
+│                    STELLA MCP                        │
+├──────────┬──────────┬──────────┬────────────────────┤
+│ Helios   │Knowledge │ Chart    │ Emergent System    │
+│ Bridge   │ Graph    │ Reading  │                    │
+│          │          │          │ discover()         │
+│ 14+ ephe-│ 6,500+   │ 3-axis   │ reflect()          │
+│ meris    │ chunks   │ Type ×   │ recall()           │
+│ tools    │ from 26  │ Framework│ validate()         │
+│          │ texts    │ × Size   │ chart_memory_stats()│
+├──────────┼──────────┼──────────┼────────────────────┤
+│ Ki (9    │ I Ching  │ ZR       │ Graph Queries      │
+│ Star Ki) │ casting  │ Reports  │ (Neo4j)            │
+└──────────┴──────────┴──────────┴────────────────────┘
+         ▼                ▼               ▼
+    Helios API      ChromaDB         charts/memory/
+   (baratie:3000)   (local)          (per-chart learning)
+```
+
+### Components
+
+1. **Helios Bridge** (Section 1) — 14+ ephemeris tools wrapping the Swiss Ephemeris REST API
+2. **Chart Storage** (Section 1b) — Local chart persistence in `charts/`
+3. **Knowledge Graph** (Section 2) — ChromaDB semantic search across 26 astrological texts
+4. **I Ching** (Section 3) — Hexagram casting (King Wen sequence) and wisdom retrieval
+5. **Resources** (Section 4) — 13 static resources (zodiac, planets, houses, aspects, charts)
+6. **Prompts** (Section 5) — 11 interpretation templates
+7. **Graph Queries** (Section 5b) — Direct Neo4j knowledge traversals (optional)
+8. **Chart Reading** (Section 6) — Full computation + knowledge-grounded narrative generation
+9. **Discover** (Section 7) — Emergent pattern detection: throws ALL techniques at a chart
+10. **Reflect & Recall** (Section 8) — Learning memory system with validation feedback
+
+---
+
+## The Emergent System ⚡
+
+The heart of Stella. Three tools that form a self-organizing learning cycle:
+
+### `discover(name)` — Variation
+
+Throws **all techniques simultaneously** at a chart and surfaces what's most active RIGHT NOW:
+
+- Transit planets hitting natal midpoints (90° dial)
+- Solar arc directions aspecting natal positions
+- Solar arc directions hitting natal midpoints
+- Tight transit aspects to natal (sub-1° orb)
+- **Convergence zones** — 5° degree bins where multiple techniques pile up
+
+Returns ranked findings sorted by orb tightness and zone density. Instead of asking
+"what are the midpoints?" — let the chart tell you what's happening.
+
+```bash
+npx mcporter call stella.discover name=chris
+```
+
+### `reflect(name, content, ...)` — Selection
+
+Stores a validated insight, prediction, or life event for a chart:
+
+```bash
+npx mcporter call stella.reflect \
+  name=chris \
+  content="SA Venus opposing natal Mars — love confronting the creative engine" \
+  techniques="solar_arc,dignities" \
+  placements="SA Venus opp natal Mars" \
+  rating=5 \
+  source=reading \
+  tags="love,power,creative"
+```
+
+Each insight carries:
+- **Technique tags** — which methods produced it
+- **Placement references** — which astrological configurations
+- **Resonance rating** (1-5) — how strongly it landed
+- **Validation status** — confirmed by lived experience or not
+- **Topic tags** — thematic classification
+
+### `recall(name, ...)` — Memory
+
+Searches the chart's accumulated insights before generating new readings:
+
+```bash
+npx mcporter call stella.recall name=chris technique=midpoints min_rating=4
+```
+
+Filter by type, technique, tag, rating, or text search. Most recent first.
+
+### `validate(name, insight_id, confirmed)` — Feedback Loop
+
+Marks predictions as confirmed or invalidated. This adjusts technique scores —
+confirmed predictions boost the techniques that produced them, misses penalize.
+Reinforcement learning for astrology.
+
+### `chart_memory_stats(name)` — Dashboard
+
+Shows what the system has learned about a chart: technique rankings by average
+resonance, most-referenced placements, validation rates, tag cloud.
+
+### The Cycle
+
+```
+discover() → surfaces signal → reading generated
+     ↓                              ↓
+  reflect() ← stores what worked ← feedback
+     ↓
+  recall() → informs next reading → discover()
+     ↓
+  validate() → adjusts technique weights
+```
+
+Each reading starts smarter than the last. Chart memory files live in
+`charts/memory/{name}.json` (gitignored — local to each instance).
+
+---
 
 ## Chart Reading System
 
-The core feature. Generates complete chart readings through three independent axes:
+The 3-axis reading generator. Every combination runs the full computation pipeline.
 
-### Type (the medium — HOW)
+### Type × Framework × Size
+
+**Type** (the medium):
 | Type | Description |
 |------|-------------|
 | `technical` | Data-forward. Astro language preserved. For practitioners. |
 | `narrative` | Human-first portrait. No jargon. Tech appendix at end. |
 | `poem` | Artistic distillation. Verse or lyric prose. Tech appendix. |
+| `cosmobiogram` | Ebertin-style midpoint-centered analysis. |
 
-### Framework (the lens — WHAT)
+**Framework** (the lens):
 | Framework | Description |
 |-----------|-------------|
 | `psychological` | Attachment, shadow, individuation. Non-fatalist. |
 | `deterministic` | GTEI. Necessitated unfolding via Absolute Self-Consistency. |
 | `hellenistic` | Sect, dignity, lots, timing. Vettius Valens lineage. |
-| `stoic` | Virtue, fate, discipline of assent. Marcus Aurelius meets the chart. |
+| `stoic` | Virtue, fate, discipline of assent. |
 | `mythological` | Gods, archetypes, hero's journey. |
+| `cosmobiological` | Ebertin midpoints + Hellenistic dignities. |
 
-### Size (the depth — HOW MUCH)
-| Size | Length | Description |
-|------|--------|-------------|
-| `xs` | 3-5 sentences | The Glance |
-| `s` | 2-3 paragraphs | Key Themes |
-| `m` | 1-2 pages | Working Reading |
-| `l` | 3-5 pages | Full Narrative |
-| `xl` | 5-10+ pages | The Deep Dive |
+**Size**: `xs` (3-5 sentences) → `s` → `m` → `l` → `xl` (5-10+ pages)
+
+**Add-ons** (layer on any reading): `+Midpoints`, `+Solar Arcs`, `+Sabian`, `+ZR`, `+Transits`
 
 ### Computation Pipeline
 
-Every reading runs the full computation regardless of size:
-1. **Natal chart** (planets, angles, lots, depositors, sect)
-2. **Whole sign houses** (computed by Stella from ASC sign)
-3. **Essential dignities** (domicile, exaltation, triplicity, term, face, detriment, fall)
-4. **Derivative houses** (Pelletier system — house-to-house relationships + aspect geometry)
-5. **Dignity-weighted narrative priority** (strongest planets drive narrative weight)
-6. **Current aspects** between all planets
-7. **Profections** (annual, lord of year)
-8. **Zodiacal Releasing** (Spirit + Fortune, L1/L2, peak periods)
-9. **Transits** to natal chart
-10. **Knowledge graph queries** (grounded in 26-text corpus)
+Every reading runs:
+1. Natal chart (planets, angles, lots, depositors, sect)
+2. Whole sign houses (computed from ASC)
+3. Essential dignities (domicile, exaltation, triplicity, term, face, detriment, fall)
+4. Derivative houses (Pelletier system)
+5. Current aspects between all planets
+6. Profections (annual, lord of year)
+7. Zodiacal Releasing (Spirit + Fortune, L1/L2, peak periods)
+8. Transits to natal
+9. Knowledge graph queries (grounded in 26-text corpus)
 
-### Dignity-Weighted Narrative Priority
+**Key principle:** Dignity score drives narrative weight. The strongest planet dominates.
+A peregrine chart ruler means the ASC archetype is CONDITIONAL.
 
-A key calibration: dignity score determines which planets dominate the narrative.
-- Strongest planet by score → most narrative real estate
-- Weak/peregrine chart ruler → ASC archetype treated as CONDITIONAL
-- Debilitated planets → shadows named directly, not softened
-- The gap between ASC mask and dominant planet = central narrative tension
+### Narrative Standard
 
-## Summary
+Oliver Sacks meets James Hillman. Clinical precision + archetypal depth. Joan Didion voice.
+Every paragraph specific to THIS chart. Include shadow/defense mechanisms. No Hallmark cards.
 
-| Component | Count |
-|-----------|-------|
-| Tools | 24+ static + dynamic |
-| Resources | 13 |
-| Prompts | 11 |
-| Knowledge chunks | 6,500+ |
-| Source texts | 26 |
-| Embedding model | text-embedding-3-large (3072 dims) |
+---
 
-## Tools (24+)
+## 9 Star Ki
+
+Japanese divination system based on the I Ching / Lo Shu magic square.
+
+- `get_ki(name)` — Calculate 3 Ki numbers from birth date
+- `get_ki_cycle(name)` — Current Ki cycle position
+- `get_ki_reading(name)` — Full narrative reading
+
+**The 3 Numbers:**
+1. **Essence** (1st) — invisible to self, iceberg below water
+2. **Emotion** (2nd) — internal processing, heart, stress shadow
+3. **Life Path** (3rd) — how people see you, career, societal lessons
+
+---
+
+## Tools Reference (30+)
+
+### Emergent System
+| Tool | Description |
+|------|-------------|
+| `discover` | Pattern detection — all techniques at once, ranked by significance |
+| `reflect` | Store insight/prediction/event with technique tags + resonance rating |
+| `recall` | Search chart memory by type, technique, tag, rating |
+| `validate` | Confirm/deny predictions (adjusts technique scores) |
+| `chart_memory_stats` | Technique rankings, placement memory, tag cloud |
 
 ### Chart Reading
 | Tool | Description |
 |------|-------------|
-| `chart_reading` | **Main tool.** Full computation + knowledge graph + narrative synthesis. 3-axis: type × framework × size. |
-| `full_chart_computation` | Raw computation only (all data, no narrative instructions) |
+| `chart_reading` | Full computation + knowledge graph + narrative. 3-axis. |
+| `full_chart_computation` | Raw computation only (all data, no narrative) |
 
 ### Ephemeris (Helios Bridge)
 | Tool | Description |
@@ -87,113 +229,149 @@ A key calibration: dignity score determines which planets dominate the narrative
 | `get_planet_aspects` | Current aspects between planets |
 | `get_weekly_moon_phase` | This week's major moon phase |
 | `get_natal_chart` | Full natal chart calculation |
-| `generate_chart` | Generate and optionally save a natal chart |
+| `generate_chart` | Generate and save a natal chart |
 | `get_chart` | Retrieve a stored chart by name |
 | `list_charts` | List all stored charts |
-| `get_profections` | Annual profections for a chart |
-| `get_zodiacal_releasing` | ZR L1/L2 periods |
-| `get_transits_now` | Current transits to a natal chart |
-| `get_transit_summary` | High-level transit summary |
+| `get_profections` | Annual profections |
+| `get_zodiacal_releasing` | ZR L1/L2 periods with peak detection |
+| `get_transits_now` | Current transits to natal chart |
+| `get_transit_summary` | High-level transit summary with timing |
 | `get_dignity_score` | Essential dignity score for a planet |
 | `get_current_dignities` | Dignity scores for all current planets |
 
-### Local Chart Storage
+### Ki & I Ching
 | Tool | Description |
 |------|-------------|
-| `store_chart` | Persist chart data locally |
-| `load_chart` | Load from local storage (falls back to Helios) |
-| `list_stored_charts` | List locally stored charts |
-| `delete_chart` | Remove a chart from local storage |
+| `get_ki` | 9 Star Ki numbers for a chart |
+| `get_ki_cycle` | Current Ki cycle position |
+| `get_ki_reading` | Full Ki narrative reading |
+| `cast_hexagram` | I Ching divination (coins or yarrow) |
+| `retrieve_wisdom` | Search I Ching wisdom texts |
 
 ### Knowledge Graph
 | Tool | Description |
 |------|-------------|
-| `knowledge_search` | Semantic search across all texts |
-| `knowledge_search_json` | Same, returns JSON |
+| `knowledge_search` | Semantic search across 26 texts |
+| `knowledge_search_json` | Same, returns structured JSON |
 | `knowledge_stats` | Collection statistics |
-| `interpret_placement` | Multi-layered interpretation of a placement |
+| `interpret_placement` | Multi-layered interpretation |
 
-### I Ching / Gnostic
+### Neo4j Graph (optional)
 | Tool | Description |
 |------|-------------|
-| `cast_hexagram` | I Ching divination (coins or yarrow) |
-| `retrieve_wisdom` | Search I Ching / Gnostic wisdom texts |
+| `graph_query` | Direct Cypher queries |
+| `graph_rulership_web` | Rulership relationships for a sign |
+| `graph_planet_condition` | Planet condition in a sign |
+| `graph_stats` | Graph statistics |
 
-## Resources (13)
+---
 
-| URI | Description |
-|-----|-------------|
-| `astrology://zodiac-signs` | 12 zodiac signs with full data |
-| `astrology://planets` | 10 planets with dignities & archetypes |
-| `astrology://houses` | 12 houses with Rudhyar perspectives |
-| `astrology://aspects` | 10 aspects with orbs & meanings |
-| `astrology://traditional-astrology` | Hellenistic framework reference |
-| `astrology://natal-chart` | Chandra's natal chart |
-| `astrology://natal-chart/{name}` | Personal charts (chris, lisa, robin, + others) |
+## Knowledge Graph Sources (26 texts)
 
-## Prompts (11)
+Across 5 layers:
+- **Technical** — Brennan, Lehman, Hand, Ebertin
+- **Psychological** — Sasportas, Pelletier, Greene
+- **Archetypal** — Tarnas, Hillman, Moore
+- **Philosophical** — Ficino, Agrippa, Cosmos & Psyche
+- **Reference** — Planet PDFs, delineation texts
 
-| Prompt | Description |
-|--------|-------------|
-| `narrative_weekly_forecast` | Poetic narrative forecast weaving natal + transits |
-| `interpret_traditional_chart` | Traditional interpretation (Chris Brennan style) |
-| `hellenistic_chart_analysis` | Hellenistic techniques analysis |
-| `archetypal_chart_analysis` | Archetypal astrology (Richard Tarnas style) |
-| `profection_year_analysis` | Annual profection year analysis |
-| `traditional_transits_analysis` | Traditional transit analysis |
-| `interpret_natal_chart` | House rulership focused interpretation |
-| `analyze_current_transits` | Current transits with house rulership |
-| `interpret_planets` | Current planetary positions interpretation |
-| `moon_energy` | Moon phase & influence analysis |
-| `weekly_planning` | Weekly astrological planning guide |
+6,500+ chunks embedded with `text-embedding-3-large` (3072 dimensions).
 
-## Elections
+---
 
-2026 electional astrology data from Brennan & Schaim stored in `elections/`:
-- `2026-elections-summary.md` — Quick reference for all 24 election windows
-- Full PDF reports for detailed analysis
+## File Structure
 
-## Setup
+```
+stella/
+├── stella_server.py           # Main MCP server (all 8 sections)
+├── ki.py                      # 9 Star Ki calculation
+├── ki_reading.py              # Ki narrative generator
+├── zr_report.py               # Zodiacal Releasing reports
+├── CHART_WORKFLOW.md           # Reading generation guide
+├── SETUP.md                   # Installation guide
+├── setup.sh                   # Automated setup script
+├── docker-compose.yml          # Neo4j container (optional)
+├── build_graph.py             # Neo4j graph builder
+├── chromadb_store/            # Knowledge graph (~300MB, Git LFS)
+├── charts/                    # Chart JSON files (gitignored)
+│   ├── memory/                # Per-chart learning memory (gitignored)
+│   └── readings/              # Generated readings (gitignored)
+├── elections/                 # 2026 electional data
+└── docs/                      # Reference materials
+    ├── KI_REFERENCE.md
+    └── ZR_REFERENCE.md
+```
 
-Uses the existing astro-knowledge venv:
+---
 
+## For AI Assistants (VA Guide)
+
+If you're an AI assistant using Stella, here's how to get the most out of it:
+
+### First: Generate the chart
 ```bash
-/home/atlas/clawd/astro-knowledge/.venv/bin/python stella_server.py
+stella.generate_chart name="person" date="YYYY-MM-DD" time="HH:MM" lat=XX.XX lon=XX.XX location="City, State"
 ```
 
-## mcporter config
-
-In `~/.mcporter/mcporter.json`:
-
-```json
-"stella": {
-  "type": "stdio",
-  "command": "/home/atlas/clawd/astro-knowledge/.venv/bin/python",
-  "args": ["/home/atlas/clawd/stella/stella_server.py"]
-}
+### For a reading: Use `chart_reading`
+```bash
+stella.chart_reading name="person" size="l" report_type="narrative" framework="psychological"
 ```
 
-## Environment
+### For current transits: Use `discover` first
+`discover` surfaces what's most active RIGHT NOW — tightest orbs, convergence zones,
+solar arc peaks. Use this BEFORE writing a transit reading to know where to focus.
+```bash
+stella.discover name="person"
+```
 
-- `SWEPH_API_BASE` — Sweph REST API URL (default: `http://baratie:3000`)
-- `OPENAI_API_KEY` — OpenAI key (or auto-read from `~/.clawdbot/clawdbot.json`)
+### After a reading lands: Use `reflect`
+When the human confirms an insight resonated, store it. Over time the system learns
+which techniques work best for each chart.
 
-## Architecture
+### Before a new reading: Use `recall`
+Check what's already been learned about this chart. Don't rediscover what's known.
+Build on accumulated insight.
 
-- **FastMCP** server with stdio transport
-- **httpx** async client for Helios API calls
-- **ChromaDB** PersistentClient for knowledge graph (6,500+ chunks, text-embedding-3-large)
-- **Neo4j** graph database for structural ontology (planets, signs, houses, aspects, authors)
-- **OpenAI** text-embedding-3-large (3072 dims) for embeddings
-- **King Wen sequence** for I Ching hexagram mapping (verified correct)
-- Auto-discovers additional sweph endpoints via `/api-info` at startup
+### Key principles
+- **Dignity drives narrative.** The strongest planet by score gets the most space.
+- **Whole sign houses always.** Hellenistic baseline regardless of framework.
+- **No cookbook readings.** Every sentence must be specific to THIS chart.
+- **Shadow included.** Debilitated planets = shadows named directly, not softened.
+- **Synthesis over summary.** One unified portrait, not sections stitched together.
+- **The Sabian symbols** add imaginal depth. Midpoint gives the principle, Sabian gives the image.
+
+### The narrative standard
+Oliver Sacks meets James Hillman. Clinical precision + archetypal depth.
+Joan Didion voice. No empty aphorisms. No recycled phrasing. No astro jargon in
+narrative prose — astrology is invisible scaffolding, only the human portrait shows.
+
+---
+
+## Environment Variables
+
+| Variable | Required | Default | Notes |
+|----------|----------|---------|-------|
+| `OPENAI_API_KEY` | **Yes** | — | Knowledge graph embeddings |
+| `SWEPH_API_BASE` | No | `http://baratie:3000` | Helios ephemeris API |
+| `NEO4J_URI` | No | `bolt://localhost:7687` | Optional graph DB |
+| `NEO4J_USER` | No | `neo4j` | Neo4j auth |
+| `NEO4J_PASS` | No | `stella_gnosis` | Neo4j auth |
+
+---
 
 ## Roadmap
 
-- [ ] Evolutionary Astrology framework (Pluto polarity, nodal story, skipped steps)
-- [ ] Archetypal Astrology framework (Tarnas, outer planet cycles)
-- [ ] Framework-specific computation adjuncts (extra data per framework)
-- [ ] "What the chart wants" auto-detection (recommend framework from chart signatures)
-- [ ] Interactive Telegram flow (inline buttons for chart → type → framework → size)
-- [ ] Transit query language (drill into specific transit periods)
-- [ ] Full transit cycle tracking (planetary returns, progressions)
+- [x] Emergent pattern detection (`discover`)
+- [x] Learning memory system (`reflect` / `recall` / `validate`)
+- [x] Solar arc directions (in `discover`)
+- [x] Midpoint transit detection (in `discover`)
+- [x] Convergence zone mapping (in `discover`)
+- [ ] Sabian symbol lookup tool (automated, not manual)
+- [ ] `discover` reads chart memory to weight findings
+- [ ] Solar arc calculation as standalone tool
+- [ ] Midpoint pictures as standalone tool
+- [ ] Cross-chart pattern detection
+- [ ] Temporal tracking (log predictions, check against events)
+- [ ] Evolutionary Astrology framework
+- [ ] Framework auto-detection from chart signatures

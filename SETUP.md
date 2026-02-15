@@ -1,107 +1,85 @@
 # Stella Setup Guide
 
-Quick setup for running Stella on a new OpenClaw instance.
-
-## Prerequisites
-
-- Python 3.11+
-- Git access to `PoweredbyPugs/Stella` (private repo)
-- Network access to Helios (sweph API) at `baratie:3000` (or wherever it's hosted)
-- An OpenAI API key (for knowledge graph embeddings/search)
-- mcporter installed (`npx mcporter`)
-
-## 1. Clone the Repo
+## Quick Start (automated)
 
 ```bash
 cd ~/clawd
-git clone https://github.com/PoweredbyPugs/Stella.git stella
+git lfs install
+git clone https://github.com/PoweredbyPugs/Stella-mcp.git stella
+cd stella
+bash setup.sh
 ```
 
-## 2. Set Up the Knowledge Graph Store
+The setup script handles everything: venv, deps, ChromaDB check, Neo4j (optional), and prints the mcporter config.
 
-The ChromaDB store (~300MB) contains 6,500+ embedded chunks from 25 astrological texts. It's NOT in the git repo — you need to copy it from atlas.
+## Manual Setup
+
+### 1. Clone with Git LFS
+
+The ChromaDB knowledge store (~300MB) is tracked via Git LFS. Install LFS first:
 
 ```bash
-# From the machine with access to atlas:
-mkdir -p ~/clawd/astro-knowledge
-scp -r atlas:~/clawd/astro-knowledge/chromadb_store ~/clawd/astro-knowledge/
+git lfs install
+git clone https://github.com/PoweredbyPugs/Stella-mcp.git stella
 ```
 
-Or if on the same tailnet:
+If you cloned without LFS, pull the large files:
 ```bash
-rsync -avz atlas:~/clawd/astro-knowledge/chromadb_store/ ~/clawd/astro-knowledge/chromadb_store/
+cd stella
+git lfs pull
 ```
 
-## 3. Create the Python Virtual Environment
+### 2. Python Virtual Environment
 
 ```bash
-cd ~/clawd/astro-knowledge
+cd stella
 python3 -m venv .venv
 source .venv/bin/activate
 pip install mcp chromadb openai httpx pydantic neo4j
 ```
 
-## 4. Environment Variables
-
-Stella needs these (set in your shell, `.env`, or mcporter config):
+### 3. Environment Variables
 
 | Variable | Required | Default | Notes |
 |----------|----------|---------|-------|
-| `OPENAI_API_KEY` | **Yes** | — | For knowledge graph search (text-embedding-3-large) |
-| `SWEPH_API_BASE` | No | `http://baratie:3000` | Helios ephemeris API URL |
-| `NEO4J_URI` | No | `bolt://localhost:7687` | Only if using Neo4j graph (optional) |
-| `NEO4J_USER` | No | `neo4j` | Neo4j auth |
-| `NEO4J_PASS` | No | `stella_gnosis` | Neo4j auth |
+| `OPENAI_API_KEY` | **Yes** | — | For knowledge graph search |
+| `SWEPH_API_BASE` | No | `http://baratie:3000` | Helios ephemeris API |
 
-If you're on the same tailnet as atlas, `baratie:3000` should resolve. Otherwise use the tailnet IP:
-```
-SWEPH_API_BASE=http://100.102.99.117:3000
-```
+If you're on the tailnet, `baratie:3000` resolves automatically.
+Otherwise use the IP: `http://100.102.99.117:3000`
 
-## 5. Configure mcporter
+### 4. Configure mcporter
 
 ```bash
 npx mcporter config edit
 ```
 
-Add this to the `mcpServers` block:
+Add to `mcpServers`:
 
 ```json
 "stella": {
   "type": "stdio",
-  "command": "/path/to/clawd/astro-knowledge/.venv/bin/python",
-  "args": ["/path/to/clawd/stella/stella_server.py"],
+  "command": "/path/to/stella/.venv/bin/python",
+  "args": ["/path/to/stella/stella_server.py"],
   "env": {
     "OPENAI_API_KEY": "sk-..."
   }
 }
 ```
 
-Replace paths with your actual install location.
-
-## 6. Verify It Works
+### 5. Verify
 
 ```bash
-# List all tools
-npx mcporter list stella
-
-# Test ephemeris connection
 npx mcporter call stella.get_current_moon
-
-# Test knowledge graph
 npx mcporter call stella.knowledge_search query="essential dignities"
-
-# Test a chart (if charts are set up)
-npx mcporter call stella.list_charts
+npx mcporter call stella.discover name=chris
 ```
 
-## 7. Charts
-
-Chart JSON files live in `stella/charts/`. To generate a new one:
+### 6. Generate a Chart
 
 ```bash
 npx mcporter call stella.generate_chart \
-  name=lisa \
+  name=person \
   date="1994-12-18" \
   time="20:00" \
   lat=37.3541 \
@@ -109,30 +87,42 @@ npx mcporter call stella.generate_chart \
   location="Santa Clara, CA"
 ```
 
-Charts are stored as JSON with full planetary positions, houses, aspects, and dignity scores.
+### 7. Neo4j (Optional)
 
-## File Structure
+The structural knowledge graph. Not required — Stella works fine without it.
 
-```
-~/clawd/
-├── stella/                    # Git repo
-│   ├── stella_server.py       # Main MCP server
-│   ├── charts/                # Stored chart JSONs
-│   │   ├── chris.json
-│   │   ├── lisa.json
-│   │   └── ...
-│   ├── charts/readings/       # Generated readings
-│   ├── elections/             # Electional astrology data
-│   └── CHART_WORKFLOW.md      # Reading generation guide
-├── astro-knowledge/
-│   ├── .venv/                 # Python virtual environment
-│   └── chromadb_store/        # Knowledge graph (~300MB)
+```bash
+docker compose up -d        # Start Neo4j
+python build_graph.py       # Build the graph
 ```
 
 ## Troubleshooting
 
-- **"No OPENAI_API_KEY found"** → Set it in mcporter env config or export it
-- **Connection refused on baratie:3000** → Check if Helios Docker container is running on atlas, or use the tailnet IP
-- **ChromaDB errors** → Make sure `~/clawd/astro-knowledge/chromadb_store/` exists and was copied correctly
-- **Neo4j connection errors** → These are non-fatal; Neo4j is optional. Stella falls back gracefully.
-- **Import errors** → Make sure you're using the venv: check that mcporter command points to `.venv/bin/python`
+- **ChromaDB files missing (small/empty)** → Run `git lfs pull`
+- **"No OPENAI_API_KEY found"** → Set it in mcporter env or export it
+- **Connection refused on baratie:3000** → Helios container may be stopped, or use tailnet IP
+- **Neo4j errors** → Non-fatal. Stella falls back gracefully without it.
+- **Import errors** → Ensure mcporter command points to `.venv/bin/python`
+
+## File Structure
+
+```
+stella/
+├── stella_server.py        # Main MCP server
+├── ki.py                   # 9 Star Ki calculation
+├── ki_reading.py           # Ki narrative generator
+├── zr_report.py            # ZR report generator
+├── setup.sh                # Automated setup
+├── docker-compose.yml      # Neo4j (optional)
+├── build_graph.py          # Neo4j graph builder
+├── chromadb_store/         # Knowledge graph (~300MB, via Git LFS)
+├── charts/                 # Your chart JSONs (local, gitignored)
+│   ├── memory/             # Per-chart learning memory (local, gitignored)
+│   └── readings/           # Generated readings (local, gitignored)
+├── elections/              # 2026 electional data
+├── docs/                   # Reference materials
+├── CHART_WORKFLOW.md       # Reading generation guide
+└── README.md               # Full documentation
+```
+
+Charts, readings, and memory files are gitignored — each Stella instance builds its own.
