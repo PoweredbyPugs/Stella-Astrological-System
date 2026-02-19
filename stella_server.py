@@ -3533,6 +3533,330 @@ def _discover_patterns(chart_data: dict, transit_data: dict) -> dict:
     return findings
 
 
+# ── Cosmobiology / Midpoint Tools ──
+
+from midpoints import (
+    lookup_ebertin_pair, find_midpoint_activations,
+    find_transit_midpoint_activations, format_midpoint_sort,
+    normalize_body, BODY_DISPLAY, to_90,
+)
+
+
+def _extract_positions_from_chart(chart_data: dict) -> dict[str, float]:
+    """Extract {body_name: zodiac_longitude} from a chart data dict."""
+    positions = {}
+    for p in chart_data.get("planets", []):
+        name = p.get("name", "")
+        lon = p.get("longitude")
+        if lon is not None and name:
+            positions[name.lower()] = float(lon)
+
+    # Angles
+    for key, label in [("ascendant", "asc"), ("midheaven", "mc")]:
+        angle = chart_data.get(key, chart_data.get("angles", {}).get(key))
+        if angle:
+            lon = float(angle.get("longitude", angle) if isinstance(angle, dict) else angle)
+            positions[label] = lon
+
+    # Node
+    for p in chart_data.get("planets", []):
+        name = p.get("name", "").lower()
+        if "node" in name or "rahu" in name:
+            positions["north_node"] = float(p["longitude"])
+
+    return positions
+
+
+@mcp.tool()
+def get_midpoint_interpretation(
+    body_1: str,
+    body_2: str,
+) -> str:
+    """Look up Ebertin's COSI interpretation for a midpoint pair.
+
+    Returns the full entry: principle, psychological/biological/sociological
+    correspondence, probable manifestations, and all third-body activations.
+
+    Args:
+        body_1: First body (sun, moon, mercury, venus, mars, jupiter, saturn,
+                uranus, neptune, pluto, node, asc, mc)
+        body_2: Second body (same options)
+    """
+    text = lookup_ebertin_pair(body_1, body_2)
+    if text:
+        return text
+
+    # Fallback to knowledge graph semantic search
+    b1 = normalize_body(body_1)
+    b2 = normalize_body(body_2)
+    display_1 = BODY_DISPLAY.get(b1, b1)
+    display_2 = BODY_DISPLAY.get(b2, b2)
+    query = f"{display_1}/{display_2} midpoint cosmobiology Ebertin"
+    collection = get_collection()
+    qe = embed_query(query)
+    results = collection.query(
+        query_embeddings=[qe],
+        n_results=3,
+        where={"tradition": "cosmobiology"},
+    )
+    if results and results["documents"] and results["documents"][0]:
+        return f"# {display_1}/{display_2} (semantic search fallback)\n\n" + "\n\n---\n\n".join(results["documents"][0])
+    return f"No Ebertin data found for {display_1}/{display_2}"
+
+
+@mcp.tool()
+async def get_midpoint_pictures(
+    name: str,
+    orb: float = 1.5,
+    top: int = 20,
+) -> str:
+    """Calculate natal midpoint pictures for a stored chart (90° dial).
+
+    Finds all planets activating midpoints within orb. Returns midpoint sort,
+    activated pictures with Ebertin delineations, and dignity context.
+
+    Args:
+        name: Stored chart name (e.g. 'chris', 'lisa')
+        orb: Maximum orb on 90° dial in degrees (default 1.5)
+        top: Maximum number of pictures to return (default 20)
+    """
+    # Load chart
+    chart_path = STELLA_DIR / "charts" / f"{name.lower()}.json"
+    if not chart_path.exists():
+        return f"Chart '{name}' not found. Use list_charts to see available charts."
+    with open(chart_path) as f:
+        chart_data = json.load(f)
+
+    positions = _extract_positions_from_chart(chart_data)
+    if len(positions) < 4:
+        return f"Insufficient positions in chart ({len(positions)} found). Need at least 4 bodies."
+
+    # Midpoint sort
+    output = [f"# Cosmobiogram — {name.title()}\n"]
+    output.append("## Midpoint Sort (90° Dial)\n")
+    output.append("```")
+    output.append(format_midpoint_sort(positions))
+    output.append("```\n")
+
+    # Find activations
+    activations = find_midpoint_activations(positions, orb=orb)
+
+    output.append(f"## Midpoint Pictures (orb ≤ {orb}°)\n")
+    output.append(f"Found **{len(activations)}** activations.\n")
+
+    # Get dignity data for context
+    dignities = {}
+    for p in chart_data.get("planets", []):
+        n = p.get("name", "").lower()
+        ds = p.get("dignityScore", p.get("dignity_score"))
+        if ds is not None:
+            dignities[n] = int(ds)
+
+    shown = 0
+    for act in activations:
+        if shown >= top:
+            output.append(f"\n*...{len(activations) - top} more activations not shown (increase top parameter)*")
+            break
+
+        notation = act["notation"]
+        orb_val = act["orb"]
+        pair = act["pair"]
+
+        output.append(f"### {notation}  (orb {orb_val:.2f}°)")
+
+        # Ebertin lookup
+        ebertin = lookup_ebertin_pair(act["body_1"], act["body_2"])
+        if ebertin:
+            # Extract first ~300 chars of the pair meaning (before sub-entries)
+            preview = ebertin[:400].strip()
+            # Cut at last complete sentence
+            last_period = preview.rfind('.')
+            if last_period > 100:
+                preview = preview[:last_period + 1]
+            output.append(f"> {preview}\n")
+
+        # Dignity context
+        act_body_lower = act["activating_body"].lower()
+        if act_body_lower in dignities:
+            ds = dignities[act_body_lower]
+            quality = "strong" if ds >= 5 else "moderate" if ds >= 0 else "challenged"
+            output.append(f"*{BODY_DISPLAY.get(act['activating_body'], act['activating_body'])} dignity: {ds:+d} ({quality})*\n")
+
+        shown += 1
+
+    return "\n".join(output)
+
+
+@mcp.tool()
+async def get_midpoint_transits(
+    name: str,
+    orb: float = 1.0,
+    top: int = 15,
+) -> str:
+    """Find current transiting planets activating natal midpoints.
+
+    Uses the 90° dial to find transits hitting natal midpoint structures.
+    Includes Ebertin delineations for each activation.
+
+    Args:
+        name: Stored chart name
+        orb: Maximum orb on 90° dial (default 1.0° — tighter for transits)
+        top: Maximum activations to return (default 15)
+    """
+    # Load natal chart
+    chart_path = STELLA_DIR / "charts" / f"{name.lower()}.json"
+    if not chart_path.exists():
+        return f"Chart '{name}' not found."
+    with open(chart_path) as f:
+        chart_data = json.load(f)
+
+    natal_positions = _extract_positions_from_chart(chart_data)
+
+    # Get current positions from Helios
+    planet_data = await call_sweph("/planets-now")
+    if not planet_data:
+        return "Could not fetch current planet positions from Helios."
+
+    sign_offsets = {
+        "Aries": 0, "Taurus": 30, "Gemini": 60, "Cancer": 90, "Leo": 120,
+        "Virgo": 150, "Libra": 180, "Scorpio": 210, "Sagittarius": 240,
+        "Capricorn": 270, "Aquarius": 300, "Pisces": 330,
+    }
+
+    transit_positions = {}
+    planets_list = planet_data if isinstance(planet_data, list) else planet_data.get("planets", [])
+    for p in planets_list:
+        pname = p.get("name", p.get("planet", "")).lower()
+        # Handle absolute longitude OR sign+degree format
+        lon = p.get("longitude", p.get("lon"))
+        if lon is not None:
+            transit_positions[pname] = float(lon)
+        else:
+            sign = p.get("sign", "")
+            deg = p.get("degreeInSign", p.get("degree"))
+            if sign in sign_offsets and deg is not None:
+                transit_positions[pname] = sign_offsets[sign] + float(deg)
+
+    if not transit_positions:
+        return "Could not fetch current planet positions from Helios."
+
+    # Find activations
+    activations = find_transit_midpoint_activations(natal_positions, transit_positions, orb=orb)
+
+    output = [f"# Midpoint Transits — {name.title()}\n"]
+    output.append(f"*Current transits activating natal midpoints (orb ≤ {orb}°)*\n")
+    output.append(f"Found **{len(activations)}** activations.\n")
+
+    shown = 0
+    for act in activations:
+        if shown >= top:
+            output.append(f"\n*...{len(activations) - top} more not shown*")
+            break
+
+        notation = act["notation"]
+        orb_val = act["orb"]
+
+        output.append(f"### {notation}  (orb {orb_val:.2f}°)")
+
+        # Ebertin lookup — use transit body as activator of natal pair
+        ebertin = lookup_ebertin_pair(act["natal_body_1"], act["natal_body_2"])
+        if ebertin:
+            preview = ebertin[:400].strip()
+            last_period = preview.rfind('.')
+            if last_period > 100:
+                preview = preview[:last_period + 1]
+            output.append(f"> {preview}\n")
+
+        shown += 1
+
+    return "\n".join(output)
+
+
+@mcp.tool()
+async def get_solar_arcs(
+    name: str,
+    orb: float = 1.0,
+    top: int = 10,
+) -> str:
+    """Calculate solar arc directions hitting natal midpoints.
+
+    Solar arcs move ~0.9856°/year. Each natal planet is advanced by
+    the solar arc to find activations against natal midpoints.
+    Primary cosmobiological timing method.
+
+    Args:
+        name: Stored chart name
+        orb: Maximum orb on 90° dial (default 1.0°)
+        top: Maximum results (default 10)
+    """
+    chart_path = STELLA_DIR / "charts" / f"{name.lower()}.json"
+    if not chart_path.exists():
+        return f"Chart '{name}' not found."
+    with open(chart_path) as f:
+        chart_data = json.load(f)
+
+    natal_positions = _extract_positions_from_chart(chart_data)
+
+    # Get birth date for solar arc calculation
+    birth_date = (
+        chart_data.get("birthDate")
+        or chart_data.get("date")
+        or chart_data.get("birthData", {}).get("date", "")
+    )
+    if not birth_date:
+        return "Chart has no birth date — cannot calculate solar arcs."
+
+    # Calculate solar arc
+    parts = birth_date.split("-")
+    birth_dt = datetime(int(parts[0]), int(parts[1]), int(parts[2]), tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    age_years = (now - birth_dt).days / 365.25
+    solar_arc = age_years * 0.9856  # ~1° per year
+
+    # Create solar arc directed positions
+    sa_positions = {}
+    for body, lon in natal_positions.items():
+        sa_positions[body] = (lon + solar_arc) % 360
+
+    # Find SA planets hitting natal midpoints
+    activations = find_transit_midpoint_activations(natal_positions, sa_positions, orb=orb)
+
+    output = [f"# Solar Arc Directions — {name.title()}\n"]
+    output.append(f"*Age: {age_years:.1f} years | Solar arc: {solar_arc:.2f}°*\n")
+    output.append(f"Found **{len(activations)}** activations (orb ≤ {orb}°).\n")
+
+    shown = 0
+    for act in activations:
+        if shown >= top:
+            output.append(f"\n*...{len(activations) - top} more not shown*")
+            break
+
+        # Relabel from "transit" to "SA"
+        sa_body = act["transit_body"]
+        display_body = BODY_DISPLAY.get(sa_body, sa_body)
+        pair = act["pair"]
+        pair_display = f"{BODY_DISPLAY.get(act['natal_body_1'], act['natal_body_1'])}/{BODY_DISPLAY.get(act['natal_body_2'], act['natal_body_2'])}"
+        orb_val = act["orb"]
+
+        output.append(f"### SA {display_body} = {pair_display}  (orb {orb_val:.2f}°)")
+
+        ebertin = lookup_ebertin_pair(act["natal_body_1"], act["natal_body_2"])
+        if ebertin:
+            preview = ebertin[:400].strip()
+            last_period = preview.rfind('.')
+            if last_period > 100:
+                preview = preview[:last_period + 1]
+            output.append(f"> {preview}\n")
+
+        # Timing: when was/is exact?
+        # orb / rate = years offset. Positive orb = not yet exact if SA approaching.
+        output.append(f"*Solar arc rate: ~0.99°/year*\n")
+
+        shown += 1
+
+    return "\n".join(output)
+
+
 @mcp.tool()
 async def discover(name: str, top: int = 10) -> str:
     """Discover what's most active in a chart RIGHT NOW.

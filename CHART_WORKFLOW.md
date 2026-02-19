@@ -48,13 +48,14 @@ Ask: *"Which framework(s)? You can pick multiple."*
 | Framework | Approach |
 |-----------|----------|
 | **Psychological** | Attachment, shadow, IFS, developmental. Non-deterministic. Include outer planets as psychological themes. |
+| **Archetypal** | Moore/Gillette four-archetype model (King/Warrior/Magician/Lover) mapped to planetary dignities. Fullness = integrated archetype, debility = shadow pole. Aristotle's golden mean as structural principle. Gender-neutral — archetypes are human energies, not gendered roles. |
 | **GTEI** | Absolute Self-Consistency, 5 Primordial Categories, deterministic. |
 | **Ki** | Blend 5.9.1 (or whatever the natal pattern is) INTO the astrological interpretation. Essence shapes identity themes, Emotion shapes Moon/Venus themes, Life Path shapes nodal/career themes. Full synthesis. |
 | **ZR** | Zodiacal Releasing as primary timing lens — life chapters, peak periods. |
 | **Stoic** | Virtue, fate, dichotomy of control. *(needs more books)* |
 | **Cosmobiological** | Midpoint pictures as structural framework, fleshed out with dignities, depositors, houses. Ebertin + Hellenistic synthesis. |
 
-**Frameworks are mixable:** Psychological + Ki ✓ | GTEI + ZR ✓ | etc.
+**Frameworks are mixable:** Psychological + Ki ✓ | GTEI + ZR ✓ | Archetypal + Cosmobiological ✓ | etc.
 
 ### Ki Framework Integration Guide
 When Ki is selected as a **framework** (not type):
@@ -64,6 +65,37 @@ When Ki is selected as a **framework** (not type):
 - Element relationships (productive/controlling cycles) inform planetary relationships
 
 This is NOT a separate Ki section — it's a lens that colors the entire reading.
+
+### Archetypal Framework Integration Guide (Moore/Gillette + Aristotle's Golden Mean)
+
+**Source:** *King, Warrior, Magician, Lover* (Moore & Gillette), ingested into knowledge graph (160 chunks, layer: archetypal, tradition: jungian).
+
+**Core principle:** Each archetype has a **fullness** (the integrated, mature form) and a **bipolar shadow system** (active/inflated pole + passive/deflated pole). This maps directly to essential dignities:
+
+| Archetype | Planets | Fullness (Golden Mean) | Active Shadow (Inflation) | Passive Shadow (Deflation) |
+|-----------|---------|----------------------|--------------------------|---------------------------|
+| **King** | Sun, Jupiter, Saturn | Order, blessing, centeredness, generativity | Tyrant (exploits, destroys) | Weakling (abdicates, impotent) |
+| **Warrior** | Mars, Saturn, Pluto | Discipline, courage, loyalty, mindfulness | Sadist (cruelty, domination) | Masochist (self-punishment, paralysis) |
+| **Magician** | Mercury, Uranus, Pluto | Awareness, insight, transformation | Detached Manipulator (uses knowledge as power) | Denying "Innocent" One (refuses to see/know) |
+| **Lover** | Venus, Moon, Neptune | Empathy, aliveness, connectedness, embodiment | Addicted Lover (boundary-less, lost in sensation) | Impotent Lover (numbed out, disconnected) |
+
+**Dignity → Archetype mapping:**
+- **Domicile/Exalted** (+5 to +8): Planet expresses the archetype's **fullness**. The golden mean — power with restraint, strength without cruelty, feeling without drowning.
+- **Peregrine** (0): Archetype is **unanchored** — could express well in favorable conditions but lacks inherent stability. Swings between shadow poles depending on context.
+- **Detriment/Fall** (-5 to -8): Planet gravitates toward one **shadow pole**. Which pole depends on other chart factors (sect, aspects, house). Detriment often → active shadow (wrong expression). Fall often → passive shadow (collapse of function).
+
+**Aristotle's Golden Mean as structural principle:**
+Every virtue sits between two vices — excess and deficiency. Courage between recklessness and cowardice. Generosity between prodigality and stinginess. This IS Moore's bipolar shadow system, and it IS the dignity spectrum. The chart shows where someone has natural access to the mean (dignified planets) and where they'll need conscious work to find it (debilitated planets).
+
+**Gender-neutral application:**
+These are *human* archetypes, not gendered roles. A woman's Mars in domicile accesses Warrior fullness — disciplined, boundaried, purposeful. A man's Venus in exaltation accesses Lover fullness — alive, empathic, aesthetically attuned. The shadow poles apply equally regardless of gender. Moore wrote about the "mature masculine" but the energies themselves are universal.
+
+**In practice:**
+1. Identify which archetypes are strongest (highest dignity planets in that archetype's domain)
+2. Identify which are in shadow (debilitated planets)
+3. For shadow planets: name BOTH poles, then use aspects/house/sect to indicate which pole dominates
+4. Pull KWML material from knowledge graph: `knowledge_search(query="[archetype] shadow integration", tradition="jungian")`
+5. Synthesize: the chart shows the *wiring*, Moore shows the *developmental task*
 
 ---
 
@@ -139,13 +171,20 @@ Current: chris, micheal, betsy, megan, kelsea, lisa, erica, will, dad
 ### Bios
 Each chart can include an optional `bio` field — what is known about the person, what they've shared about themselves, life context. Stored alongside chart JSON in `stella/charts/`. Bios ground readings in lived reality: the chart says what the wiring is, the bio says how it's lived.
 
-### Cosmobiological Forecasting (TODO)
-- **Solar arc directions**: natal position + (age × ~0.9856°) — primary cosmobiological timing
-- **Transit midpoint pictures**: transiting planet hitting natal midpoints
-- **Midpoint transit pictures**: two transiting planets forming midpoint on natal planet
-- **Knowledge source**: Ebertin, *The Combination of Stellar Influences* (OCR'd, ~/clawd/ebertin-cosi-full.txt)
+### Cosmobiological Tools (LIVE)
+Full design doc: `stella/COSMOBIOLOGY.md`
+
+- **`get_midpoint_interpretation(body_1, body_2)`** — Direct Ebertin COSI lookup for any pair
+- **`get_midpoint_pictures(name, orb, top)`** — Full natal cosmobiogram (90° dial, midpoint trees, Ebertin delineations + dignity context)
+- **`get_midpoint_transits(name, orb, top)`** — Current transits activating natal midpoints
+- **`get_solar_arcs(name, orb, top)`** — Solar arc directions to natal midpoints (~1°/year timing)
 - **Sabian symbols**: pending book scan from Buckley — imagery for key degrees (midpoints, angles, planets)
-- Integrate into Stella as tools: `get_midpoint_pictures`, `get_solar_arcs`, `get_midpoint_transits`
+
+### Knowledge Graph Sources (8,892 chunks)
+- 25 astrological texts (Brennan, Tarnas, Lehman, Sasportas, planet PDFs, etc.)
+- Ebertin COSI — 78 midpoint pairs (tradition: cosmobiology)
+- Moore & Gillette KWML — 160 chunks (tradition: jungian, layer: archetypal)
+- I Ching / 9 Star Ki materials
 
 ---
 
@@ -160,3 +199,10 @@ Each chart can include an optional `bio` field — what is known about the perso
 | `stella.get_transits_now` | Current transits to natal |
 | `stella.get_ki_reading` | 9 Star Ki + I Ching reading |
 | `stella.knowledge_search` | Search texts for deeper material |
+| `stella.get_midpoint_interpretation` | Ebertin COSI lookup for a midpoint pair |
+| `stella.get_midpoint_pictures` | Natal cosmobiogram (90° dial) |
+| `stella.get_midpoint_transits` | Current transits to natal midpoints |
+| `stella.get_solar_arcs` | Solar arc directions to natal midpoints |
+| `stella.discover` | What's most active in a chart right now |
+| `stella.reflect` | Generate insight from chart patterns |
+| `stella.recall` | Retrieve stored chart memories |

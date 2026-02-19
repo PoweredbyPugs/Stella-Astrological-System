@@ -5,3 +5,6 @@ __pycache__/
 charts/*.json
 charts/readings/
 charts/memory/*.json
+chromadb_store/
+ARCHITECTURE.md
+CONSTELLATION-AGENT.md
