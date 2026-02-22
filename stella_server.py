@@ -36,7 +36,7 @@ TRUST_LABELS = {1: "PRIMARY", 2: "BRIDGE", 3: "REFERENCE", 4: "PERIPHERAL"}
 # Neo4j
 NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USER = os.environ.get("NEO4J_USER", "neo4j")
-NEO4J_PASS = os.environ.get("NEO4J_PASS", "stella_gnosis")
+NEO4J_PASS = os.environ.get("NEO4J_PASS", "selene_gnosis")
 
 # ── Init ──
 mcp = FastMCP("stella")
