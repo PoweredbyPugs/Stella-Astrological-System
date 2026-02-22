@@ -24,19 +24,12 @@ from datetime import datetime, timezone
 from urllib.parse import urlencode
 
 import httpx
-import chromadb
 from openai import OpenAI
 from neo4j import GraphDatabase
 from mcp.server.fastmcp import FastMCP
 
 # ── Config ──
 STELLA_DIR = Path(__file__).parent
-# Look for chromadb_store in repo first, then fall back to astro-knowledge sibling
-CHROMA_DIR = STELLA_DIR / "chromadb_store"
-if not CHROMA_DIR.exists():
-    CHROMA_DIR = STELLA_DIR.parent / "astro-knowledge" / "chromadb_store"
-COLLECTION_NAME = "astro_knowledge"
-EMBEDDING_MODEL = "text-embedding-3-large"
 SWEPH_API_BASE = os.environ.get("SWEPH_API_BASE", "http://baratie:3000")
 TRUST_LABELS = {1: "PRIMARY", 2: "BRIDGE", 3: "REFERENCE", 4: "PERIPHERAL"}
 
@@ -50,11 +43,6 @@ mcp = FastMCP("stella")
 
 
 # ── Helpers ──
-
-class NoOpEmbedding(chromadb.EmbeddingFunction):
-    def __call__(self, input):
-        return [[0.0] * 1536 for _ in input]
-
 
 _openai_client = None
 
@@ -77,33 +65,6 @@ def get_openai_client() -> OpenAI:
         raise ValueError("No OPENAI_API_KEY found")
     _openai_client = OpenAI(api_key=api_key)
     return _openai_client
-
-
-_collection = None
-
-
-def get_collection():
-    global _collection
-    if _collection:
-        return _collection
-    chroma = chromadb.PersistentClient(path=str(CHROMA_DIR))
-    _collection = chroma.get_collection(COLLECTION_NAME, embedding_function=NoOpEmbedding())
-    return _collection
-
-
-def embed_query(text: str) -> list[float]:
-    client = get_openai_client()
-    response = client.embeddings.create(model=EMBEDDING_MODEL, input=[text])
-    return response.data[0].embedding
-
-
-def embed_batch(texts: list[str]) -> list[list[float]]:
-    """Embed multiple texts in a single API call. Much faster than one-by-one."""
-    if not texts:
-        return []
-    client = get_openai_client()
-    response = client.embeddings.create(model=EMBEDDING_MODEL, input=texts)
-    return [item.embedding for item in sorted(response.data, key=lambda x: x.index)]
 
 
 # ── Neo4j ──
@@ -877,6 +838,118 @@ def delete_chart(name: str) -> str:
 # SECTION 2: KNOWLEDGE GRAPH — Search & Interpretation
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+def _knowledge_query_neo4j(
+    query: str = "",
+    layer: Optional[str] = None,
+    trust_tier: Optional[int] = None,
+    planet: Optional[str] = None,
+    sign: Optional[str] = None,
+    house: Optional[str] = None,
+    aspect: Optional[str] = None,
+    technique: Optional[str] = None,
+    tradition: Optional[str] = None,
+    author: Optional[str] = None,
+    top: int = 5,
+) -> list[dict]:
+    """Internal: query Interpretation nodes from Neo4j using structural edges and filters."""
+    # Build dynamic Cypher with optional MATCH clauses and WHERE filters
+    match_clauses = ["MATCH (i:Interpretation)"]
+    where_clauses = []
+    params: dict = {"limit": top}
+
+    # Structural edge filters
+    if planet and sign:
+        match_clauses.append("MATCH (i)-[:INTERPRETS_PLACEMENT]->(np:NatalPlacement)")
+        where_clauses.append("toLower(np.planet) = $planet AND toLower(np.sign) = $sign")
+        params["planet"] = planet.lower()
+        params["sign"] = sign.lower()
+    elif planet:
+        match_clauses.append("MATCH (i)-[:DESCRIBES]->(p:Planet)")
+        where_clauses.append("toLower(p.id) = $planet")
+        params["planet"] = planet.lower()
+    elif sign:
+        match_clauses.append("MATCH (i)-[:DESCRIBES]->(s:Sign)")
+        where_clauses.append("toLower(s.id) = $sign")
+        params["sign"] = sign.lower()
+
+    if house:
+        match_clauses.append("MATCH (i)-[:INTERPRETS_HOUSE]->(h:House)")
+        where_clauses.append("h.number = $house")
+        params["house"] = int(house) if isinstance(house, str) and house.isdigit() else house
+
+    if aspect:
+        where_clauses.append("i.tags CONTAINS $aspect")
+        params["aspect"] = aspect.lower()
+
+    if layer:
+        match_clauses.append("MATCH (i)-[:IN_LAYER]->(l:Layer)")
+        where_clauses.append("l.id = $layer")
+        params["layer"] = layer.lower()
+
+    if trust_tier is not None:
+        where_clauses.append("i.trust_tier = $trust_tier")
+        params["trust_tier"] = trust_tier
+
+    if tradition:
+        where_clauses.append("i.tradition = $tradition")
+        params["tradition"] = tradition.lower()
+
+    if author:
+        match_clauses.append("MATCH (i)-[:AUTHORED_BY]->(a:Author)")
+        where_clauses.append("toLower(a.name) CONTAINS $author")
+        params["author"] = author.lower()
+
+    if technique:
+        where_clauses.append("i.tags CONTAINS $technique")
+        params["technique"] = technique.lower().replace("_", " ")
+
+    # Free-text search via full-text index or CONTAINS fallback
+    if query and not (planet or sign or house or aspect):
+        # Try full-text index first; fall back to CONTAINS
+        try:
+            ft_cypher = "CALL db.index.fulltext.queryNodes('interpretation_text', $query) YIELD node, score "
+            ft_cypher += " ".join(match_clauses[1:]).replace("(i)", "(node)").replace("i.", "node.").replace("(i)-", "(node)-") if len(match_clauses) > 1 else ""
+            # Simpler approach: use full-text as primary filter
+            ft_match = ["CALL db.index.fulltext.queryNodes('interpretation_text', $query) YIELD node AS i, score"]
+            ft_match.extend(match_clauses[1:])
+            ft_where = " AND ".join(where_clauses) if where_clauses else ""
+            ft_query = " ".join(ft_match)
+            if ft_where:
+                ft_query += f" WHERE {ft_where}"
+            ft_query += """
+                OPTIONAL MATCH (i)-[:AUTHORED_BY]->(auth:Author)
+                OPTIONAL MATCH (i)-[:IN_LAYER]->(ly:Layer)
+                RETURN i.text AS text, auth.name AS author, i.source_title AS title,
+                       i.trust_tier AS tier, ly.id AS layer, i.tradition AS tradition,
+                       i.tags AS tags, score
+                ORDER BY score DESC
+                LIMIT $limit
+            """
+            params["query"] = query
+            results = neo4j_query(ft_query, **params)
+            if results:
+                return results
+        except Exception:
+            pass
+        # CONTAINS fallback
+        where_clauses.append("toLower(i.text) CONTAINS $query_lower")
+        params["query_lower"] = query.lower()
+
+    cypher = " ".join(match_clauses)
+    if where_clauses:
+        cypher += " WHERE " + " AND ".join(where_clauses)
+    cypher += """
+        OPTIONAL MATCH (i)-[:AUTHORED_BY]->(auth:Author)
+        OPTIONAL MATCH (i)-[:IN_LAYER]->(ly:Layer)
+        RETURN i.text AS text, auth.name AS author, i.source_title AS title,
+               i.trust_tier AS tier, ly.id AS layer, i.tradition AS tradition,
+               i.tags AS tags
+        ORDER BY i.trust_tier ASC
+        LIMIT $limit
+    """
+    return neo4j_query(cypher, **params)
+
+
 @mcp.tool()
 def knowledge_search(
     query: str,
@@ -891,10 +964,10 @@ def knowledge_search(
     author: Optional[str] = None,
     top: int = 5,
 ) -> str:
-    """Search the astrology knowledge graph with natural language.
+    """Search the astrology knowledge graph (Neo4j) with structural and text matching.
 
-    Searches 6,160+ chunks from 25 curated astrological texts (Brennan, Tarnas,
-    Lehman, Sasportas, planet PDFs, ZR materials, Gnostic I Ching).
+    Queries 8,900+ Interpretation nodes from 36 curated texts linked via
+    INTERPRETS_PLACEMENT, INTERPRETS_HOUSE, INTERPRETS_ASPECT edges.
 
     Filters:
     - layer: technical | psychological | archetypal | philosophical | reference
@@ -908,76 +981,31 @@ def knowledge_search(
     - author: filter by author name
     - top: number of results (default 5)
     """
-    collection = get_collection()
-
-    # Enhance query with entity context
-    query_enhanced = query
-    if planet:
-        query_enhanced = f"{planet} {query_enhanced}"
-    if sign:
-        query_enhanced = f"{query_enhanced} {sign}"
-    if house:
-        query_enhanced = f"{query_enhanced} {house}th house"
-    if aspect:
-        query_enhanced = f"{query_enhanced} {aspect}"
-    if technique:
-        query_enhanced = f"{query_enhanced} {technique.replace('_', ' ')}"
-
-    query_embedding = embed_query(query_enhanced)
-
-    # Metadata filters (exact match only)
-    conditions = []
-    if layer:
-        conditions.append({"layer": layer})
-    if trust_tier is not None:
-        conditions.append({"trust_tier": trust_tier})
-    if tradition:
-        conditions.append({"tradition": tradition})
-    if author:
-        conditions.append({"source_author": author})
-
-    where_filter = None
-    if len(conditions) == 1:
-        where_filter = conditions[0]
-    elif len(conditions) > 1:
-        where_filter = {"$and": conditions}
-
-    results = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=top,
-        where=where_filter,
+    results = _knowledge_query_neo4j(
+        query=query, layer=layer, trust_tier=trust_tier, planet=planet,
+        sign=sign, house=house, aspect=aspect, technique=technique,
+        tradition=tradition, author=author, top=top,
     )
 
-    if not results["documents"][0]:
+    if not results:
         return "No results found."
 
-    output_parts = [f'Results for: "{query}" ({collection.count()} chunks searched)\n']
+    output_parts = [f'Results for: "{query}" (Neo4j knowledge graph)\n']
 
-    for i, (doc, meta, dist) in enumerate(zip(
-        results["documents"][0],
-        results["metadatas"][0],
-        results["distances"][0],
-    )):
-        tier = meta.get("trust_tier", 4)
+    for i, r in enumerate(results):
+        tier = r.get("tier", 4)
         tier_label = TRUST_LABELS.get(tier, "?")
-        relevance = round(1 - dist, 3)
+        lyr = (r.get("layer") or "?").upper()
 
-        header = (
-            f"[{i+1}] [{meta.get('layer', '?').upper()}] [{tier_label}] "
-            f"— {meta.get('source_author', '?')}: {meta.get('source_title', '?')}"
-        )
+        header = f"[{i+1}] [{lyr}] [{tier_label}] — {r.get('author', '?')}: {r.get('title', '?')}"
 
-        tags = []
-        for key in ["planets", "signs", "houses", "aspects", "techniques"]:
-            val = meta.get(key, "")
-            if val:
-                tags.append(f"{key}={val}")
+        tags = r.get("tags") or ""
+        text = r.get("text", "")
+        text = text[:800] + "..." if len(text) > 800 else text
 
-        text = doc[:800] + "..." if len(doc) > 800 else doc
-
-        output_parts.append(f"{header}\nRelevance: {relevance}")
+        output_parts.append(header)
         if tags:
-            output_parts.append(f"Tags: {', '.join(tags)}")
+            output_parts.append(f"Tags: {tags}")
         output_parts.append(f"\n{text}\n")
         output_parts.append("─" * 60)
 
@@ -999,107 +1027,71 @@ def knowledge_search_json(
 ) -> str:
     """Search the knowledge graph and return structured JSON results.
 
-    Same parameters as knowledge_search(). Use this for programmatic consumption.
+    Same parameters as knowledge_search(). Uses Neo4j graph queries.
     """
-    collection = get_collection()
-
-    query_enhanced = query
-    if planet:
-        query_enhanced = f"{planet} {query_enhanced}"
-    if sign:
-        query_enhanced = f"{query_enhanced} {sign}"
-    if house:
-        query_enhanced = f"{query_enhanced} {house}th house"
-    if technique:
-        query_enhanced = f"{query_enhanced} {technique.replace('_', ' ')}"
-
-    query_embedding = embed_query(query_enhanced)
-
-    conditions = []
-    if layer:
-        conditions.append({"layer": layer})
-    if trust_tier is not None:
-        conditions.append({"trust_tier": trust_tier})
-    if tradition:
-        conditions.append({"tradition": tradition})
-    if author:
-        conditions.append({"source_author": author})
-
-    where_filter = None
-    if len(conditions) == 1:
-        where_filter = conditions[0]
-    elif len(conditions) > 1:
-        where_filter = {"$and": conditions}
-
-    results = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=top,
-        where=where_filter,
+    results = _knowledge_query_neo4j(
+        query=query, layer=layer, trust_tier=trust_tier, planet=planet,
+        sign=sign, house=house, technique=technique,
+        tradition=tradition, author=author, top=top,
     )
 
     output = []
-    if results["documents"][0]:
-        for doc, meta, dist in zip(
-            results["documents"][0],
-            results["metadatas"][0],
-            results["distances"][0],
-        ):
-            output.append({
-                "text": doc,
-                "relevance": round(1 - dist, 4),
-                "author": meta.get("source_author"),
-                "title": meta.get("source_title"),
-                "layer": meta.get("layer"),
-                "trust_tier": meta.get("trust_tier"),
-                "tradition": meta.get("tradition"),
-                "planets": [p for p in meta.get("planets", "").split(",") if p],
-                "signs": [s for s in meta.get("signs", "").split(",") if s],
-                "houses": [h for h in meta.get("houses", "").split(",") if h],
-                "aspects": [a for a in meta.get("aspects", "").split(",") if a],
-                "techniques": [t for t in meta.get("techniques", "").split(",") if t],
-            })
+    for r in results:
+        tags = r.get("tags") or ""
+        output.append({
+            "text": r.get("text", ""),
+            "author": r.get("author"),
+            "title": r.get("title"),
+            "layer": r.get("layer"),
+            "trust_tier": r.get("tier"),
+            "tradition": r.get("tradition"),
+            "tags": tags,
+        })
 
     return json.dumps(output, indent=2)
 
 
 @mcp.tool()
 def knowledge_stats() -> str:
-    """Get statistics about the knowledge graph collection.
+    """Get statistics about the knowledge graph (Neo4j).
 
-    Shows total chunks, distribution by layer, trust tier, author, and tradition.
+    Shows total interpretation nodes, distribution by layer, trust tier, author, and tradition.
     """
-    collection = get_collection()
-    count = collection.count()
-    sample = collection.get(limit=min(count, 2000), include=["metadatas"])
+    count_result = neo4j_query("MATCH (i:Interpretation) RETURN count(i) AS count")
+    count = count_result[0]["count"] if count_result else 0
 
-    sources: dict[str, int] = {}
-    layers: dict[str, int] = {}
-    tiers: dict[str, int] = {}
-    traditions: dict[str, int] = {}
+    layers_result = neo4j_query("""
+        MATCH (i:Interpretation)-[:IN_LAYER]->(l:Layer)
+        RETURN l.id AS layer, count(i) AS count ORDER BY count DESC
+    """)
+    tiers_result = neo4j_query("""
+        MATCH (i:Interpretation)
+        RETURN i.trust_tier AS tier, count(i) AS count ORDER BY count DESC
+    """)
+    authors_result = neo4j_query("""
+        MATCH (i:Interpretation)-[:AUTHORED_BY]->(a:Author)
+        RETURN a.name AS author, count(i) AS count ORDER BY count DESC
+    """)
+    traditions_result = neo4j_query("""
+        MATCH (i:Interpretation)
+        WHERE i.tradition IS NOT NULL
+        RETURN i.tradition AS tradition, count(i) AS count ORDER BY count DESC
+    """)
 
-    for meta in sample["metadatas"]:
-        author = meta.get("source_author", "unknown")
-        sources[author] = sources.get(author, 0) + 1
-        layer = meta.get("layer", "unknown")
-        layers[layer] = layers.get(layer, 0) + 1
-        tier = TRUST_LABELS.get(meta.get("trust_tier", 4), "?")
-        tiers[tier] = tiers.get(tier, 0) + 1
-        tradition = meta.get("tradition", "unknown")
-        traditions[tradition] = traditions.get(tradition, 0) + 1
-
-    lines = [f"Astrology Knowledge Graph — {count} chunks\n"]
+    lines = [f"Astrology Knowledge Graph — {count} interpretation nodes (Neo4j)\n"]
     lines.append("By Layer:")
-    for l, c in sorted(layers.items(), key=lambda x: -x[1]):
-        lines.append(f"  {l}: {c}")
+    for r in layers_result:
+        lines.append(f"  {r['layer']}: {r['count']}")
     lines.append("\nBy Trust Tier:")
-    for t, c in sorted(tiers.items(), key=lambda x: -x[1]):
-        lines.append(f"  {t}: {c}")
+    for r in tiers_result:
+        tier_label = TRUST_LABELS.get(r["tier"], "?")
+        lines.append(f"  {tier_label} (tier {r['tier']}): {r['count']}")
     lines.append("\nBy Author:")
-    for a, c in sorted(sources.items(), key=lambda x: -x[1]):
-        lines.append(f"  {a}: {c}")
+    for r in authors_result:
+        lines.append(f"  {r['author']}: {r['count']}")
     lines.append("\nBy Tradition:")
-    for t, c in sorted(traditions.items(), key=lambda x: -x[1]):
-        lines.append(f"  {t}: {c}")
+    for r in traditions_result:
+        lines.append(f"  {r['tradition']}: {r['count']}")
     return "\n".join(lines)
 
 
@@ -1113,11 +1105,8 @@ def interpret_placement(
 ) -> str:
     """Get a multi-layered interpretation for a specific astrological placement.
 
-    Automatically queries across all interpretive layers:
-    - Technical (Hellenistic): dignity, sect, condition
-    - Psychological: depth psychology perspective
-    - Reference: practical delineation from multiple authors
-    - Archetypal: Jungian/mythological perspective
+    Uses Neo4j structural edges (INTERPRETS_PLACEMENT, INTERPRETS_HOUSE,
+    INTERPRETS_ASPECT) to find relevant interpretations across all layers.
 
     Args:
         planet: The planet (sun, moon, mercury, venus, mars, jupiter, saturn, uranus, neptune, pluto)
@@ -1126,8 +1115,6 @@ def interpret_placement(
         aspect_planet: Optional second planet for aspect interpretation
         aspect_type: Optional aspect type (conjunction, sextile, square, trine, opposition)
     """
-    collection = get_collection()
-
     query_parts = [planet.title()]
     if sign:
         query_parts.append(f"in {sign.title()}")
@@ -1137,26 +1124,26 @@ def interpret_placement(
         query_parts.append(f"{aspect_type} {aspect_planet.title()}")
 
     query_text = " ".join(query_parts)
-    query_embedding = embed_query(query_text)
 
     layers_to_query = ["technical", "psychological", "reference", "archetypal"]
     output_parts = [f"Multi-layered interpretation: {query_text}\n"]
 
     for layer_name in layers_to_query:
         try:
-            results = collection.query(
-                query_embeddings=[query_embedding],
-                n_results=2,
-                where={"layer": layer_name},
+            results = _knowledge_query_neo4j(
+                planet=planet, sign=sign, house=house,
+                aspect=aspect_type if aspect_planet else None,
+                layer=layer_name, top=2,
             )
-            if results["documents"][0]:
+            if results:
                 output_parts.append(f"\n{'═' * 40}")
                 output_parts.append(f"[{layer_name.upper()}]")
                 output_parts.append(f"{'═' * 40}")
-                for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
-                    author = meta.get("source_author", "?")
-                    text = doc[:600] + "..." if len(doc) > 600 else doc
-                    output_parts.append(f"\n— {author}:")
+                for r in results:
+                    a = r.get("author", "?")
+                    text = r.get("text", "")
+                    text = text[:600] + "..." if len(text) > 600 else text
+                    output_parts.append(f"\n— {a}:")
                     output_parts.append(text)
         except Exception:
             pass
@@ -1358,28 +1345,17 @@ def retrieve_wisdom(
         query: Search query about I Ching concepts, hexagrams, or wisdom
         top_k: Number of results to return (default 5)
     """
-    collection = get_collection()
-    query_embedding = embed_query(query)
+    results = _knowledge_query_neo4j(query=query, tradition="iching", top=top_k)
 
-    results = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=top_k,
-        where={"tradition": "iching"},
-    )
-
-    if not results["documents"][0]:
+    if not results:
         return "No wisdom passages found."
 
     output = []
-    for doc, meta, dist in zip(
-        results["documents"][0],
-        results["metadatas"][0],
-        results["distances"][0],
-    ):
+    for r in results:
         output.append({
-            "text": doc[:1000],
-            "relevance": round(1 - dist, 3),
-            "source": meta.get("source_title", "Unknown"),
+            "text": (r.get("text") or "")[:1000],
+            "source": r.get("title", "Unknown"),
+            "author": r.get("author", "Unknown"),
         })
 
     return json.dumps(output, indent=2)
@@ -2897,39 +2873,31 @@ def _gather_knowledge_for_chart(chart_data: dict, results_per_query: int = 3) ->
                              "layer": r.get("layer", "")} for r in results],
             })
         else:
-            # Fall back to ChromaDB semantic search
+            # Fall back to Neo4j text search
             try:
-                query_text = (
-                    f"{conn_planet} in {conn_house}th house derivative Pelletier"
+                fallback_results = _knowledge_query_neo4j(
+                    query=f"{conn_planet} {conn_house}th house",
+                    author="Robert Pelletier",
+                    top=results_per_query,
                 )
-                query_embedding = embed_query(query_text)
-                collection = get_collection()
-                chroma_results = collection.query(
-                    query_embeddings=[query_embedding],
-                    n_results=results_per_query,
-                    where={"source_author": "Robert Pelletier"} if results_per_query <= 5 else None,
-                )
-                if chroma_results["documents"][0]:
+                if fallback_results:
                     deriv_num = conn.get("derivative_number", "?")
                     deriv_meaning = conn.get("derivative_meaning", "")
                     knowledge_hits.append({
                         "query": f"{conn_planet} derivative to house {conn_house} "
-                                 f"({deriv_num}th = {deriv_meaning}, semantic search)",
+                                 f"({deriv_num}th = {deriv_meaning}, graph search)",
                         "results": [
                             {
-                                "text": doc[:500],
-                                "author": meta.get("source_author", "?"),
-                                "title": meta.get("source_title", "?"),
-                                "tier": meta.get("trust_tier", 4),
+                                "text": (r.get("text") or "")[:500],
+                                "author": r.get("author", "?"),
+                                "title": r.get("title", "?"),
+                                "tier": r.get("tier", 4),
                             }
-                            for doc, meta in zip(
-                                chroma_results["documents"][0],
-                                chroma_results["metadatas"][0],
-                            )
+                            for r in fallback_results
                         ],
                     })
             except Exception:
-                pass  # ChromaDB fallback is best-effort
+                pass  # Graph fallback is best-effort
 
     # ── Archetypal layer: notable dignities/debilities ──
     dignities = chart_data.get("dignities", [])
@@ -3586,21 +3554,19 @@ def get_midpoint_interpretation(
     if text:
         return text
 
-    # Fallback to knowledge graph semantic search
+    # Fallback to knowledge graph search
     b1 = normalize_body(body_1)
     b2 = normalize_body(body_2)
     display_1 = BODY_DISPLAY.get(b1, b1)
     display_2 = BODY_DISPLAY.get(b2, b2)
-    query = f"{display_1}/{display_2} midpoint cosmobiology Ebertin"
-    collection = get_collection()
-    qe = embed_query(query)
-    results = collection.query(
-        query_embeddings=[qe],
-        n_results=3,
-        where={"tradition": "cosmobiology"},
+    results = _knowledge_query_neo4j(
+        query=f"{display_1} {display_2} midpoint cosmobiology",
+        tradition="cosmobiology",
+        top=3,
     )
-    if results and results["documents"] and results["documents"][0]:
-        return f"# {display_1}/{display_2} (semantic search fallback)\n\n" + "\n\n---\n\n".join(results["documents"][0])
+    if results:
+        texts = [(r.get("text") or "") for r in results]
+        return f"# {display_1}/{display_2} (graph search fallback)\n\n" + "\n\n---\n\n".join(texts)
     return f"No Ebertin data found for {display_1}/{display_2}"
 
 
@@ -4229,6 +4195,114 @@ def chart_memory_stats(name: str) -> str:
         "type_distribution": type_counts,
         "tag_cloud": dict(sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)),
     }, indent=2)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SECTION: NEO4J KNOWLEDGE GRAPH TOOLS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+try:
+    from graph.neo4j_tools import (
+        traverse_chain, find_receptions, get_aspect_network,
+        get_midpoint_pictures, chart_as_graph, walk_interpretation,
+        query_graph, compare_charts, graph_stats
+    )
+    NEO4J_AVAILABLE = True
+    print("[stella] Neo4j graph tools loaded", file=sys.stderr)
+except Exception as e:
+    NEO4J_AVAILABLE = False
+    print(f"[stella] Neo4j tools unavailable: {e}", file=sys.stderr)
+
+if NEO4J_AVAILABLE:
+    @mcp.tool()
+    async def graph_traverse_chain(name: str, planet: str) -> str:
+        """Walk the depositor chain from a planet to its final dispositor.
+        Shows every step: planet → sign ruler → sign ruler → ... → terminus.
+        Use to understand how planetary energy flows through the chart."""
+        result = traverse_chain(name, planet)
+        return json.dumps(result, indent=2)
+
+    @mcp.tool()
+    async def graph_find_receptions(name: str) -> str:
+        """Find all mutual receptions in a chart (by domicile, exaltation, or mixed).
+        Mutual receptions create hidden bridges between planets that bypass normal depositor flow."""
+        result = find_receptions(name)
+        if not result:
+            return json.dumps({"message": f"No mutual receptions found in {name}'s chart"})
+        return json.dumps(result, indent=2)
+
+    @mcp.tool()
+    async def graph_aspect_network(name: str, planet: str = "") -> str:
+        """Get the natal aspect network for a chart. Pass planet name to filter to one planet's aspects.
+        Returns all aspects sorted by orb (tightest first)."""
+        result = get_aspect_network(name, planet if planet else None)
+        return json.dumps(result, indent=2)
+
+    @mcp.tool()
+    async def graph_midpoint_pictures(name: str, planet: str = "", max_orb: float = 1.0) -> str:
+        """Get midpoint pictures (90° dial) for a chart. The cosmobiogram wiring.
+        Pass planet to filter. max_orb defaults to 1.0°."""
+        result = get_midpoint_pictures(name, planet if planet else None, max_orb)
+        return json.dumps(result, indent=2)
+
+    @mcp.tool()
+    async def graph_chart(name: str) -> str:
+        """Return complete chart as a graph structure: placements, depositor chains,
+        aspects, mutual receptions, and connected insights. The full picture."""
+        result = chart_as_graph(name)
+        return json.dumps(result, indent=2)
+
+    @mcp.tool()
+    async def graph_walk(name: str, planet: str) -> str:
+        """Walk the graph from a natal placement, collecting EVERYTHING connected:
+        the placement, its depositor chain, who deposits to it, all aspects,
+        midpoint pictures, sign ontology, relevant text interpretations, and
+        emergent triad insights. This is the tool for novel interpretation —
+        the reading emerges from the walk, not from pre-written text."""
+        result = walk_interpretation(name, planet)
+        return json.dumps(result, indent=2)
+
+    @mcp.tool()
+    async def graph_compare(chart1: str, chart2: str) -> str:
+        """Compare two charts — shared sign placements, cross-chart aspects (synastry),
+        and structural similarities (final dispositors, depositor chain overlap)."""
+        result = compare_charts(chart1, chart2)
+        return json.dumps(result, indent=2)
+
+    @mcp.tool()
+    async def graph_query(cypher: str) -> str:
+        """Execute a raw Cypher query against the knowledge graph.
+        Use for custom traversals and analysis not covered by other tools.
+        Examples:
+        - MATCH (p:NatalPlacement {chart:'chris'})-[:DEPOSITS_TO*]->(t) RETURN p.planet, t.planet
+        - MATCH (i:Interpretation)-[:DESCRIBES]->(p:Planet {name:'Mars'})-[:EXALTED_IN]->(s:Sign) RETURN i.text LIMIT 3
+        - MATCH path = shortestPath((a:Planet {name:'Sun'})-[*]-(b:Planet {name:'Pluto'})) RETURN path"""
+        result = query_graph(cypher)
+        return json.dumps(result, indent=2, default=str)
+
+    @mcp.tool()
+    async def graph_synthesize(name: str, planet: str) -> str:
+        """Generate a narrative scaffold for a single placement by walking the graph.
+        Collects everything connected — dignity, decan, term, depositor chain,
+        aspects, midpoints, interpretations, insights — and organizes it for synthesis.
+        The reading emerges from the walk. Includes auto-generated synthesis questions."""
+        from graph.synthesize import synthesize_placement
+        return synthesize_placement(name, planet)
+
+    @mcp.tool()
+    async def graph_synthesize_chart(name: str) -> str:
+        """Generate a full chart synthesis scaffold by walking every traditional planet.
+        Returns the complete narrative scaffold for all 7 traditional planets."""
+        from graph.synthesize import synthesize_chart
+        return synthesize_chart(name)
+
+    @mcp.tool()
+    async def graph_stats() -> str:
+        """Return current knowledge graph statistics — node counts, relationship counts,
+        chart names, and overall graph size."""
+        from graph.neo4j_tools import graph_stats as _stats
+        result = _stats()
+        return json.dumps(result, indent=2)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

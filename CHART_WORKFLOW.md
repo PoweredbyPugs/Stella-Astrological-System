@@ -111,6 +111,26 @@ Ask: *"What size?"*
 | **L** | 3-5 pages | Full narrative, all sections |
 | **XL** | 5-10+ pages | Exhaustive, planet-by-planet |
 
+### Temperature (1-10)
+
+Append a number to the size: **M5**, **XL8**, **S2**, etc. If omitted, default is **3**.
+
+| Temp | Mode | What changes |
+|------|------|-------------|
+| **1-2** | Coherent | Established delineations, familiar frameworks, clear traditional synthesis. Safe, accurate, grounded. |
+| **3-4** | Warm | Standard readings with some novel metaphor and cross-tradition pulls. Default zone. |
+| **5-6** | Hot | Actively seeking unusual source combinations. Knowledge graph queries broadened — pulling from different layers/traditions than the obvious ones. New structural approaches to the reading. Metaphors from outside astrology. |
+| **7-8** | Chaotic | Every explanation must be fresh. No recycling ANY phrasing or structural pattern from prior readings. Cross-pollinate aggressively: Ebertin meets Hillman meets attachment theory meets architecture meets music theory. Arrive at conclusions through paths never walked before. |
+| **9-10** | Feral | Pure synthesis. The knowledge graph becomes a randomized oracle — pull from unexpected chunks, let contradictions coexist, find the reading in the collision. Poetry over precision. The emergent triad's laboratory. |
+
+**Implementation:**
+- At temp 1-3: Use primary knowledge graph hits, standard delineation structure
+- At temp 4-6: Broaden knowledge_search queries with unusual keyword combinations, pull from non-obvious layers (e.g., archetypal material for a technical question, cosmobiological material for a narrative reading)
+- At temp 7-8: Randomize query strategies — search by planet in one tradition, by house in another, by aspect pattern in a third. Synthesize across mismatched sources. NO phrase or structural repetition from any prior reading.
+- At temp 9-10: Query the knowledge graph with abstract/poetic terms. Let the material suggest the structure rather than imposing one. Treat contradictory sources as equally valid — the reading lives in the tension.
+
+**The rule:** At ANY temperature, a transit/placement must NEVER be explained the same way it was in a previous reading. Temperature controls how far from familiar territory the explanation travels.
+
 ---
 
 ## Step 5: Add-ons
@@ -120,7 +140,7 @@ Ask: *"Any add-ons? (ZR section, Transits, Ki cycle) Or ready to generate?"*
 - **+ZR** — Zodiacal Releasing appendix (L1/L2 chapters, peak periods)
 - **+Transits** — Current transits to natal appendix
 - **+Ki** — 9 Star Ki cycle appendix (current personal year/month, hexagram)
-- **+Midpoints** — Natal midpoint pictures (90° dial, Ebertin delineations + dignity synthesis)
+- **+Midpoints** — Current transits activating natal midpoints ONLY (90° dial, Ebertin delineations). Do NOT include natal midpoint pictures — those belong to Cosmobiogram type or Cosmobiological framework.
 - **+Solar Arcs** — Solar arc directions to natal midpoints (~1°/year timing method)
 - **+Sabian** — Sabian symbols for key degrees (midpoint degrees, planet degrees, angles)
 
@@ -148,6 +168,12 @@ Confirm the full spec, then generate.
 
 ### Calibration:
 Dignity score drives narrative weight more than ASC archetype. Lead with strongest planet's lived experience.
+
+### Framework = Skeleton, Not Seasoning:
+When a framework is selected, it **structures the entire reading**. The framework's categories/principles become the section headings. Content (placements, midpoints, dignities) fills those sections as evidence. The framework is NOT annotations tacked onto an otherwise standard reading. Example: GTEI Cosmobiogram → Five Primordial Categories ARE the sections, midpoint pictures map into them. Psychological Narrative → developmental stages or attachment patterns ARE the sections, placements fill them.
+
+### No Cryptic Openings:
+Especially in technical readings (Cosmobiogram, Technical type), do not open with poetic/cryptic prose. State what the reading is and what it shows. Temperature 10 means novel synthesis and unexpected connections — not obfuscation or purple prose.
 
 ### Uniqueness Rule:
 Each reading must be interpretively fresh. NO recycling phrases, structures, or openings from previous readings. Same quality, unique expression.
