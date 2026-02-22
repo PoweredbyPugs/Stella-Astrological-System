@@ -84,7 +84,7 @@ def neo4j_query(cypher: str, **params) -> list[dict]:
     """Run a Cypher query and return results as list of dicts."""
     driver = get_neo4j()
     with driver.session() as session:
-        result = session.run(cypher, **params)
+        result = session.run(cypher, parameters=params)
         return [dict(record) for record in result]
 
 
@@ -859,8 +859,32 @@ def _knowledge_query_neo4j(
 
     # Structural edge filters
     if planet and sign:
-        match_clauses.append("MATCH (i)-[:INTERPRETS_PLACEMENT]->(np:NatalPlacement)")
-        where_clauses.append("toLower(np.planet) = $planet AND toLower(np.sign) = $sign")
+        # Full-text search scoped to planet+sign via DESCRIBES edges
+        # Build a full-text query that requires both terms
+        ft_query = f"{planet.capitalize()} AND {sign.capitalize()}"
+        try:
+            results = neo4j_query("""
+                CALL db.index.fulltext.queryNodes('interpretation_text', $ft_query) YIELD node AS i, score
+                MATCH (i)-[:DESCRIBES]->(p:Planet)
+                MATCH (i)-[:DESCRIBES]->(s:Sign)
+                WHERE toLower(p.id) = $planet AND toLower(s.id) = $sign
+                OPTIONAL MATCH (i)-[:AUTHORED_BY]->(auth:Author)
+                OPTIONAL MATCH (i)-[:IN_LAYER]->(ly:Layer)
+                RETURN i.text AS text, auth.name AS author, i.source_title AS title,
+                       i.trust_tier AS tier, ly.id AS layer, i.tradition AS tradition,
+                       i.tags AS tags, score
+                ORDER BY score DESC
+                LIMIT $limit
+            """, ft_query=ft_query, planet=planet.lower(), sign=sign.lower(), limit=top)
+            if results:
+                return results
+        except Exception:
+            pass
+        # Fallback: DESCRIBES edges + text contains
+        match_clauses.append("MATCH (i)-[:DESCRIBES]->(p:Planet)")
+        match_clauses.append("MATCH (i)-[:DESCRIBES]->(s:Sign)")
+        where_clauses.append("toLower(p.id) = $planet AND toLower(s.id) = $sign")
+        where_clauses.append("toLower(i.text) CONTAINS $sign")
         params["planet"] = planet.lower()
         params["sign"] = sign.lower()
     elif planet:
