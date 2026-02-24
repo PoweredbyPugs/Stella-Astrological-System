@@ -34,6 +34,7 @@ Ask: *"What type of reading?"*
 | **Poem** | Pure poetry in the body — NO astro jargon in the poem itself. Symbolism and imagery only. Technical appendix still included at end. |
 | **Ki** | Pure 9 Star Ki + I Ching — trigrams, hexagrams, elemental cycles. NO Western astrology blended in. |
 | **Cosmobiogram** | 90° dial midpoint analysis — midpoint trees, pictures, wiring diagram. Ebertin method. Can layer dignities/depositors. |
+| **Autopoietic** | Self-creating reading through iterative divergence/convergence. Multiple frameworks independently read the chart; overlap = signal. See [AUTOPOIETIC.md](AUTOPOIETIC.md). |
 
 **Note:** Ki as *Type* = standalone Ki reading. Ki as *Framework* (Step 3) = Ki meanings woven INTO astrological interpretation.
 

@@ -1,0 +1,14 @@
+{
+  "frameworks": {
+    "gtei": { "lens": "structural", "vocabulary": "primordial categories, self-consistency", "distance_group": "A" },
+    "psychological": { "lens": "developmental", "vocabulary": "attachment, shadow, archetype", "distance_group": "B" },
+    "stoic": { "lens": "ethical", "vocabulary": "prohairesis, askesis, oikeiosis", "distance_group": "C" },
+    "cosmobiological": { "lens": "geometric", "vocabulary": "midpoints, 90° dial, pictures", "distance_group": "A" },
+    "archetypal": { "lens": "mythic", "vocabulary": "King, Warrior, Magician, Lover", "distance_group": "B" },
+    "ki": { "lens": "energetic", "vocabulary": "center, fire, water, 9 star", "distance_group": "D" }
+  },
+  "types": ["narrative", "technical", "cosmobiogram", "poem"],
+  "temperature_curve": [9, 9, 5, 7, 7, 3, 5, 5, 1],
+  "max_rounds": 5,
+  "convergence_threshold": "When a converge pass produces no new claims not already present in the previous convergence."
+}

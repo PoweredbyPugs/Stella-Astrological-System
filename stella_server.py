@@ -4330,6 +4330,378 @@ if NEO4J_AVAILABLE:
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SECTION: AUTOPOIETIC CHART TOOLS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+AUTOPOIETIC_DIR = STELLA_DIR / "autopoietic"
+AUTOPOIETIC_SESSIONS = AUTOPOIETIC_DIR / "sessions"
+AUTOPOIETIC_CONFIG = AUTOPOIETIC_DIR / "config.json"
+
+
+def _load_auto_config() -> dict:
+    """Load the autopoietic framework config."""
+    if AUTOPOIETIC_CONFIG.exists():
+        return json.loads(AUTOPOIETIC_CONFIG.read_text())
+    return {"frameworks": {}, "types": [], "temperature_curve": [], "max_rounds": 5}
+
+
+def _load_auto_session(session_id: str) -> dict | None:
+    """Load an autopoietic session by ID."""
+    path = AUTOPOIETIC_SESSIONS / f"{session_id}.json"
+    if path.exists():
+        return json.loads(path.read_text())
+    return None
+
+
+def _save_auto_session(session: dict):
+    """Save an autopoietic session."""
+    AUTOPOIETIC_SESSIONS.mkdir(parents=True, exist_ok=True)
+    path = AUTOPOIETIC_SESSIONS / f"{session['session_id']}.json"
+    path.write_text(json.dumps(session, indent=2))
+
+
+def _pick_divergent_pair(config: dict, used: list[str]) -> tuple[str, str]:
+    """Pick two frameworks from different distance groups, preferring unused ones."""
+    frameworks = config["frameworks"]
+    remaining = {k: v for k, v in frameworks.items() if k not in used}
+    # Fall back to all frameworks if fewer than 2 remain
+    pool = remaining if len(remaining) >= 2 else frameworks
+
+    # Group by distance_group
+    groups: dict[str, list[str]] = {}
+    for name, meta in pool.items():
+        g = meta["distance_group"]
+        groups.setdefault(g, []).append(name)
+
+    # Pick from two different groups
+    group_keys = list(groups.keys())
+    random.shuffle(group_keys)
+    if len(group_keys) >= 2:
+        a = random.choice(groups[group_keys[0]])
+        b = random.choice(groups[group_keys[1]])
+    else:
+        # Only one group available — pick two from it
+        members = groups[group_keys[0]]
+        random.shuffle(members)
+        a, b = members[0], members[1] if len(members) > 1 else members[0]
+    return a, b
+
+
+def _get_temperature(config: dict, pass_index: int) -> int:
+    """Get temperature for a given pass index (0-based) from the curve."""
+    curve = config.get("temperature_curve", [9, 9, 5, 7, 7, 3, 5, 5, 1])
+    if pass_index < len(curve):
+        return curve[pass_index]
+    return curve[-1] if curve else 5
+
+
+@mcp.tool()
+async def autopoietic_init(name: str, frameworks: list[str] | None = None) -> dict:
+    """Initialize an autopoietic chart session.
+    Picks two maximally divergent frameworks from the pool.
+    Returns session_id, assigned frameworks, temperatures, and generation prompts.
+
+    Args:
+        name: Chart name (must exist in charts/)
+        frameworks: Optional list to restrict framework pool. If None, uses all.
+    """
+    config = _load_auto_config()
+    now = datetime.now()
+    session_id = f"auto_{name}_{now.strftime('%Y%m%d_%H%M%S')}"
+
+    # Pick first divergent pair
+    if frameworks and len(frameworks) >= 2:
+        fw_a, fw_b = frameworks[0], frameworks[1]
+    else:
+        fw_a, fw_b = _pick_divergent_pair(config, [])
+
+    type_a = random.choice(config.get("types", ["narrative"]))
+    type_b = random.choice([t for t in config.get("types", ["narrative"]) if t != type_a] or config.get("types", ["narrative"]))
+    temp_d1 = _get_temperature(config, 0)
+    temp_d2 = _get_temperature(config, 1)
+
+    all_fw = list(config["frameworks"].keys())
+    remaining = [f for f in all_fw if f not in [fw_a, fw_b]]
+
+    session = {
+        "session_id": session_id,
+        "chart_name": name,
+        "created": now.isoformat(),
+        "status": "active",
+        "rounds": [],
+        "current_round": {
+            "round": 1,
+            "diverge": [],
+            "converge": None,
+        },
+        "frameworks_used": [fw_a, fw_b],
+        "frameworks_remaining": remaining,
+        "final_statement": None,
+        "terminated": False,
+    }
+    _save_auto_session(session)
+
+    fw_meta = config["frameworks"]
+    return {
+        "session_id": session_id,
+        "chart_name": name,
+        "round": 1,
+        "assignments": [
+            {
+                "framework": fw_a,
+                "lens": fw_meta.get(fw_a, {}).get("lens", ""),
+                "vocabulary": fw_meta.get(fw_a, {}).get("vocabulary", ""),
+                "type": type_a,
+                "temperature": temp_d1,
+            },
+            {
+                "framework": fw_b,
+                "lens": fw_meta.get(fw_b, {}).get("lens", ""),
+                "vocabulary": fw_meta.get(fw_b, {}).get("vocabulary", ""),
+                "type": type_b,
+                "temperature": temp_d2,
+            },
+        ],
+        "instructions": (
+            f"Generate TWO independent readings of {name}'s chart.\n"
+            f"Reading 1: {fw_a} framework ({fw_meta.get(fw_a, {}).get('lens', '')} lens), "
+            f"{type_a} format, temperature {temp_d1}.\n"
+            f"Reading 2: {fw_b} framework ({fw_meta.get(fw_b, {}).get('lens', '')} lens), "
+            f"{type_b} format, temperature {temp_d2}.\n"
+            f"Each reading is INDEPENDENT — do not reference the other.\n"
+            f"Submit each with autopoietic_submit(pass_type='diverge')."
+        ),
+    }
+
+
+@mcp.tool()
+async def autopoietic_submit(session_id: str, pass_type: str, content: str, framework: str = "", temperature: int = 0) -> dict:
+    """Submit a diverge or converge pass to an autopoietic session.
+
+    Args:
+        session_id: The session ID from autopoietic_init
+        pass_type: 'diverge' or 'converge'
+        content: The reading text or convergence statement
+        framework: Framework name (required for diverge passes)
+        temperature: Temperature used for this pass
+    """
+    session = _load_auto_session(session_id)
+    if not session:
+        return {"error": f"Session {session_id} not found"}
+    if session.get("terminated"):
+        return {"error": "Session is terminated", "final_statement": session.get("final_statement")}
+
+    current = session.get("current_round", {})
+
+    if pass_type == "diverge":
+        config = _load_auto_config()
+        entry = {
+            "framework": framework,
+            "type": "",
+            "temperature": temperature,
+            "content": content,
+        }
+        current.setdefault("diverge", []).append(entry)
+        session["current_round"] = current
+
+        diverge_count = len(current["diverge"])
+        _save_auto_session(session)
+        return {
+            "status": "diverge_submitted",
+            "round": current.get("round", 1),
+            "diverge_count": diverge_count,
+            "next": "Submit another diverge pass" if diverge_count < 2 else "Call autopoietic_converge to get convergence prompt",
+        }
+
+    elif pass_type == "converge":
+        current["converge"] = {
+            "temperature": temperature,
+            "content": content,
+        }
+        # Complete the round
+        completed_round = {
+            "round": current.get("round", 1),
+            "diverge": current.get("diverge", []),
+            "converge": current["converge"],
+        }
+        session["rounds"].append(completed_round)
+        session.pop("current_round", None)
+        _save_auto_session(session)
+
+        return {
+            "status": "round_complete",
+            "round": completed_round["round"],
+            "rounds_completed": len(session["rounds"]),
+            "next": "Call autopoietic_status to check if process should continue or terminate",
+        }
+
+    return {"error": f"Unknown pass_type: {pass_type}. Use 'diverge' or 'converge'."}
+
+
+@mcp.tool()
+async def autopoietic_converge(session_id: str) -> dict:
+    """Get the convergence prompt for the current round.
+    Returns a prompt that instructs the agent to find overlap between
+    the current round's diverge passes. Includes the actual reading texts.
+    """
+    session = _load_auto_session(session_id)
+    if not session:
+        return {"error": f"Session {session_id} not found"}
+
+    current = session.get("current_round", {})
+    diverge_passes = current.get("diverge", [])
+
+    if len(diverge_passes) < 2:
+        return {"error": f"Need at least 2 diverge passes before converging. Have {len(diverge_passes)}."}
+
+    # Calculate convergence temperature
+    config = _load_auto_config()
+    round_num = current.get("round", 1)
+    # Convergence is pass index: (round-1)*3 + 2 (0-indexed: D1, D2, C1, D3, D4, C2, ...)
+    pass_index = (round_num - 1) * 3 + 2
+    conv_temp = _get_temperature(config, pass_index)
+
+    # Build the passages text
+    passages = []
+    for i, d in enumerate(diverge_passes, 1):
+        passages.append(f"--- PASSAGE {i} ({d.get('framework', 'unknown')}) ---\n{d['content']}")
+    passages_text = "\n\n".join(passages)
+
+    # Include previous convergence as context if exists
+    prev_convergence = ""
+    if session["rounds"]:
+        last_conv = session["rounds"][-1].get("converge", {}).get("content", "")
+        if last_conv:
+            prev_convergence = f"\n\nPrevious convergence statement:\n{last_conv}"
+
+    prompt = (
+        f"CONVERGENCE PASS — Round {round_num}, Temperature {conv_temp}\n\n"
+        f"Read these {len(diverge_passes)} passages carefully.\n\n"
+        f"{passages_text}\n"
+        f"{prev_convergence}\n\n"
+        f"INSTRUCTIONS:\n"
+        f"State ONLY what ALL passages arrived at independently.\n"
+        f"No framework vocabulary. No astrology jargon.\n"
+        f"Maximum one paragraph. Plain language.\n"
+        f"If they don't overlap, say so — that's data.\n"
+        f"Temperature {conv_temp}: {'Be precise and conservative.' if conv_temp <= 3 else 'Allow some interpretive latitude.' if conv_temp <= 6 else 'Cast a wide net for shared signal.'}\n\n"
+        f"Submit your convergence with: autopoietic_submit(session_id='{session_id}', pass_type='converge', content='...', temperature={conv_temp})"
+    )
+
+    return {
+        "round": round_num,
+        "temperature": conv_temp,
+        "num_passages": len(diverge_passes),
+        "prompt": prompt,
+    }
+
+
+@mcp.tool()
+async def autopoietic_status(session_id: str) -> dict:
+    """Check the status of an autopoietic session.
+    Returns: rounds completed, frameworks used/remaining, convergence statements,
+    whether to continue or terminate, next assignment if continuing.
+    """
+    session = _load_auto_session(session_id)
+    if not session:
+        return {"error": f"Session {session_id} not found"}
+
+    config = _load_auto_config()
+    rounds_completed = len(session.get("rounds", []))
+    convergences = [r["converge"]["content"] for r in session.get("rounds", []) if r.get("converge")]
+
+    # Check termination conditions
+    should_terminate = False
+    termination_reason = None
+
+    if rounds_completed >= config.get("max_rounds", 5):
+        should_terminate = True
+        termination_reason = "Maximum rounds reached"
+    elif len(convergences) >= 2:
+        # Compare last two convergences — if substantially similar, terminate
+        last = convergences[-1]
+        prev = convergences[-2]
+        # Simple heuristic: if they share >70% of words, likely converged
+        last_words = set(last.lower().split())
+        prev_words = set(prev.lower().split())
+        if last_words and prev_words:
+            overlap = len(last_words & prev_words) / max(len(last_words | prev_words), 1)
+            if overlap > 0.7:
+                should_terminate = True
+                termination_reason = f"Convergence stabilized (word overlap: {overlap:.0%})"
+
+    if should_terminate:
+        session["terminated"] = True
+        session["status"] = "terminated"
+        session["final_statement"] = convergences[-1] if convergences else None
+        _save_auto_session(session)
+        return {
+            "status": "terminated",
+            "reason": termination_reason,
+            "rounds_completed": rounds_completed,
+            "final_statement": session["final_statement"],
+            "convergence_history": convergences,
+            "frameworks_used": session.get("frameworks_used", []),
+        }
+
+    # Continue — pick next pair
+    fw_a, fw_b = _pick_divergent_pair(config, session.get("frameworks_used", []))
+    next_round = rounds_completed + 1
+
+    # Update session
+    session["frameworks_used"] = list(set(session.get("frameworks_used", []) + [fw_a, fw_b]))
+    session["frameworks_remaining"] = [
+        f for f in config["frameworks"] if f not in session["frameworks_used"]
+    ]
+    session["current_round"] = {
+        "round": next_round,
+        "diverge": [],
+        "converge": None,
+    }
+    _save_auto_session(session)
+
+    type_a = random.choice(config.get("types", ["narrative"]))
+    type_b = random.choice([t for t in config.get("types", ["narrative"]) if t != type_a] or config.get("types", ["narrative"]))
+    pass_idx_d1 = (next_round - 1) * 3
+    pass_idx_d2 = (next_round - 1) * 3 + 1
+    temp_d1 = _get_temperature(config, pass_idx_d1)
+    temp_d2 = _get_temperature(config, pass_idx_d2)
+
+    fw_meta = config["frameworks"]
+    seed = convergences[-1] if convergences else ""
+
+    return {
+        "status": "continue",
+        "rounds_completed": rounds_completed,
+        "convergence_history": convergences,
+        "next_round": next_round,
+        "seed": seed,
+        "assignments": [
+            {
+                "framework": fw_a,
+                "lens": fw_meta.get(fw_a, {}).get("lens", ""),
+                "type": type_a,
+                "temperature": temp_d1,
+            },
+            {
+                "framework": fw_b,
+                "lens": fw_meta.get(fw_b, {}).get("lens", ""),
+                "type": type_b,
+                "temperature": temp_d2,
+            },
+        ],
+        "instructions": (
+            f"Round {next_round}: Generate TWO independent readings of {session['chart_name']}'s chart.\n"
+            f"SEED from previous convergence: \"{seed}\"\n"
+            f"Each reading should explore this seed through its own lens — do NOT just restate it.\n"
+            f"Reading 1: {fw_a} ({fw_meta.get(fw_a, {}).get('lens', '')}), {type_a}, temp {temp_d1}\n"
+            f"Reading 2: {fw_b} ({fw_meta.get(fw_b, {}).get('lens', '')}), {type_b}, temp {temp_d2}\n"
+            f"Submit each with autopoietic_submit(pass_type='diverge')."
+        ),
+    }
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # MAIN
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
