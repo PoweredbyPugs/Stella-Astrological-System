@@ -66,10 +66,12 @@ That's it. The selection algorithm will incorporate it automatically. New distan
 
 ## Results → Emergent Triad
 
-The final convergence statement feeds back into the chart's memory:
-- Saved as an insight in `charts/memory/{name}.json`
+The final convergence statement feeds back into the chart's memory — but ONLY after user validation:
+- Presented to the user first. Always.
+- Stored as `validated: false` until the user confirms resonance
+- Once validated, saved as an insight in `charts/memory/{name}.json`
 - Tagged with all frameworks used and `autopoietic` technique
-- The insight carries more weight because it emerged from multiple independent lenses
+- Never auto-validated. The system proposes. The human confirms.
 
 ## Example
 

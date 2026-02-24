@@ -4582,7 +4582,7 @@ async def autopoietic_converge(session_id: str) -> dict:
         f"INSTRUCTIONS:\n"
         f"State ONLY what ALL passages arrived at independently.\n"
         f"No framework vocabulary. No astrology jargon.\n"
-        f"Maximum one paragraph. Plain language.\n"
+        f"Plain language. Be as brief or as long as the truth requires.\n"
         f"If they don't overlap, say so — that's data.\n"
         f"Temperature {conv_temp}: {'Be precise and conservative.' if conv_temp <= 3 else 'Allow some interpretive latitude.' if conv_temp <= 6 else 'Cast a wide net for shared signal.'}\n\n"
         f"Submit your convergence with: autopoietic_submit(session_id='{session_id}', pass_type='converge', content='...', temperature={conv_temp})"
