@@ -650,8 +650,11 @@ async def get_void_of_course_moons(
 ) -> str:
     """Get Void of Course Moon periods.
 
-    Uses traditional Ptolemaic aspects (conjunction, sextile, square, trine, opposition)
-    to determine when the Moon makes its last major aspect before changing signs.
+    Uses Ptolemaic aspects (conjunction, sextile, square, trine, opposition)
+    to all major planets (Sun through Pluto) to determine when the Moon
+    makes its last major aspect before changing signs.
+
+    Native calculation via pyswisseph — no Helios dependency.
 
     Three ways to specify the period:
     1. timeframe: 'day', 'week', or 'month' (relative to today)
@@ -665,30 +668,241 @@ async def get_void_of_course_moons(
 
     Returns:
         JSON array of VOC periods with:
-        - start: When Moon goes VOC (last Ptolemaic aspect)
+        - start: When Moon goes VOC (last Ptolemaic aspect perfects)
         - end: When Moon enters the next sign
         - duration: Human-readable duration
-        - lastAspect: Details of the final aspect before VOC
-        - nextSign: The sign Moon will enter
+        - lastAspect: The final aspect before VOC
+        - previousSign: Sign Moon is leaving
+        - newSign: Sign Moon is entering
     """
-    parts = []
+    from datetime import date, timedelta
+    from voc import calculate_voc
 
-    # Custom date range takes precedence
+    today = date.today()
+
     if start_date and end_date:
-        parts.append(f"start={start_date}")
-        parts.append(f"end={end_date}")
+        s, e = start_date, end_date
     elif timeframe:
-        # Validate timeframe
-        if timeframe.lower() not in ("day", "week", "month"):
+        tf = timeframe.lower()
+        if tf not in ("day", "week", "month"):
             return json.dumps({
                 "error": f"Invalid timeframe '{timeframe}'. Use 'day', 'week', or 'month'."
             })
-        parts.append(f"timeframe={timeframe.lower()}")
-    # else: no params = Helios defaults to week
+        s = today.isoformat()
+        if tf == "day":
+            e = today.isoformat()
+        elif tf == "week":
+            e = (today + timedelta(days=7)).isoformat()
+        else:  # month
+            e = (today + timedelta(days=30)).isoformat()
+    else:
+        # Default: this week
+        s = today.isoformat()
+        e = (today + timedelta(days=7)).isoformat()
 
-    query = f"?{'&'.join(parts)}" if parts else ""
-    data = await call_sweph(f"/void-of-course-moons{query}")
-    return json.dumps(data, indent=2)
+    try:
+        periods = calculate_voc(s, e)
+        return json.dumps({
+            "dateRange": {"start": s, "end": e},
+            "timezone": "America/New_York",
+            "voidOfCourseMoons": periods,
+        }, indent=2)
+    except Exception as ex:
+        return json.dumps({"error": str(ex)})
+
+
+# ── Ephemeris tools (pyswisseph native) ──
+
+import ephemeris as eph
+
+
+@mcp.tool()
+async def transit_timing(
+    name: str,
+    transit_planet: str,
+    natal_planet: str,
+    aspect: str,
+    orb: float = 3.0,
+) -> str:
+    """Find when a specific transit enters orb, perfects, and leaves orb.
+
+    Args:
+        name: Chart name (e.g. 'chris')
+        transit_planet: Transiting planet (e.g. 'Saturn')
+        natal_planet: Natal planet or point (e.g. 'Sun')
+        aspect: Aspect type (conjunction, sextile, square, trine, opposition)
+        orb: Orb in degrees (default 3.0)
+    """
+    try:
+        result = eph.transit_timing(name, transit_planet, natal_planet, aspect, orb)
+        return json.dumps(result, indent=2)
+    except Exception as ex:
+        return json.dumps({"error": str(ex)})
+
+
+@mcp.tool()
+async def search_next_transit(
+    name: str,
+    transit_planet: Optional[str] = None,
+    natal_planet: Optional[str] = None,
+    aspect: Optional[str] = None,
+    days: int = 90,
+) -> str:
+    """Search for upcoming transits to a natal chart.
+
+    Args:
+        name: Chart name (e.g. 'chris')
+        transit_planet: Filter by transiting planet (optional)
+        natal_planet: Filter by natal planet (optional)
+        aspect: Filter by aspect type (optional)
+        days: Number of days to search (default 90)
+    """
+    try:
+        result = eph.search_next_transit(name, transit_planet, natal_planet, aspect, days)
+        return json.dumps(result, indent=2)
+    except Exception as ex:
+        return json.dumps({"error": str(ex)})
+
+
+@mcp.tool()
+async def lunar_return(
+    name: str,
+    target_date: Optional[str] = None,
+) -> str:
+    """Calculate the next lunar return chart.
+
+    Args:
+        name: Chart name (e.g. 'chris')
+        target_date: Start searching from this date, YYYY-MM-DD (default: today)
+    """
+    try:
+        result = eph.lunar_return(name, target_date)
+        return json.dumps(result, indent=2)
+    except Exception as ex:
+        return json.dumps({"error": str(ex)})
+
+
+@mcp.tool()
+async def solar_return(
+    name: str,
+    year: Optional[int] = None,
+) -> str:
+    """Calculate solar return chart for a given year.
+
+    Args:
+        name: Chart name (e.g. 'chris')
+        year: Year for the solar return (default: current year)
+    """
+    try:
+        result = eph.solar_return(name, year)
+        return json.dumps(result, indent=2)
+    except Exception as ex:
+        return json.dumps({"error": str(ex)})
+
+
+@mcp.tool()
+async def secondary_progressions(
+    name: str,
+    target_date: Optional[str] = None,
+) -> str:
+    """Calculate secondary progressed chart (1 day = 1 year).
+
+    Args:
+        name: Chart name (e.g. 'chris')
+        target_date: Date to progress to, YYYY-MM-DD (default: today)
+    """
+    try:
+        result = eph.progressions(name, target_date)
+        return json.dumps(result, indent=2)
+    except Exception as ex:
+        return json.dumps({"error": str(ex)})
+
+
+@mcp.tool()
+async def find_elections(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    lat: float = 28.5383,
+    lon: float = -81.3792,
+    moon_signs: Optional[str] = None,
+) -> str:
+    """Find favorable electional windows based on Moon condition and benefic aspects.
+
+    Args:
+        start_date: YYYY-MM-DD (default: today)
+        end_date: YYYY-MM-DD (default: 7 days from start)
+        lat: Latitude (default: Orlando FL)
+        lon: Longitude (default: Orlando FL)
+        moon_signs: Comma-separated preferred Moon signs (optional)
+    """
+    try:
+        criteria = {}
+        if moon_signs:
+            criteria["moon_signs"] = [s.strip() for s in moon_signs.split(",")]
+        result = eph.elections(criteria, start_date, end_date, lat, lon)
+        return json.dumps(result, indent=2)
+    except Exception as ex:
+        return json.dumps({"error": str(ex)})
+
+
+@mcp.tool()
+async def find_eclipses(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    name: Optional[str] = None,
+) -> str:
+    """Find upcoming solar and lunar eclipses, optionally checking natal contacts.
+
+    Args:
+        start_date: YYYY-MM-DD (default: today)
+        end_date: YYYY-MM-DD (default: 1 year from start)
+        name: Chart name to check natal contacts (optional)
+    """
+    try:
+        result = eph.eclipses(start_date, end_date, name)
+        return json.dumps(result, indent=2)
+    except Exception as ex:
+        return json.dumps({"error": str(ex)})
+
+
+@mcp.tool()
+async def get_exact_ingresses(
+    planet: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> str:
+    """Get precise sign ingress times for any planet.
+
+    Args:
+        planet: Planet name (default: Moon)
+        start_date: YYYY-MM-DD (default: today)
+        end_date: YYYY-MM-DD (default: 30 days from start)
+    """
+    try:
+        result = eph.exact_ingresses(planet, start_date, end_date)
+        return json.dumps(result, indent=2)
+    except Exception as ex:
+        return json.dumps({"error": str(ex)})
+
+
+@mcp.tool()
+async def get_planetary_hours(
+    date: Optional[str] = None,
+    lat: float = 28.5383,
+    lon: float = -81.3792,
+) -> str:
+    """Calculate planetary hours for a date at a location.
+
+    Args:
+        date: YYYY-MM-DD (default: today)
+        lat: Latitude (default: Orlando FL)
+        lon: Longitude (default: Orlando FL)
+    """
+    try:
+        result = eph.planetary_hours(date, lat, lon)
+        return json.dumps(result, indent=2)
+    except Exception as ex:
+        return json.dumps({"error": str(ex)})
 
 
 # ── Auto-discover additional sweph endpoints ──
