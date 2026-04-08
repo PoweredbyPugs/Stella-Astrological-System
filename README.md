@@ -245,13 +245,15 @@ Japanese divination system based on the I Ching / Lo Shu magic square.
 | `get_ki` | 9 Star Ki numbers for a chart |
 | `get_ki_cycle` | Current Ki cycle position |
 | `get_ki_reading` | Full Ki narrative reading |
+| `get_daily_ki` | Traditional daily Ki (days-since-Lichun cascade) — **authoritative** |
+| `get_convergence_ki` | Experimental Moon-socket daily Ki model (day Ki is experimental) |
 | `cast_hexagram` | I Ching divination (coins or yarrow) |
 | `retrieve_wisdom` | Search I Ching wisdom texts |
 
 ### Knowledge Graph
 | Tool | Description |
 |------|-------------|
-| `knowledge_search` | Semantic search across 26 texts |
+| `knowledge_search` | Semantic search across 38 texts (Neo4j) |
 | `knowledge_search_json` | Same, returns structured JSON |
 | `knowledge_stats` | Collection statistics |
 | `interpret_placement` | Multi-layered interpretation |
@@ -266,16 +268,20 @@ Japanese divination system based on the I Ching / Lo Shu magic square.
 
 ---
 
-## Knowledge Graph Sources (26 texts)
+## Knowledge Graph Sources (38 texts, 10,411 chunks)
 
 Across 5 layers:
 - **Technical** — Brennan, Lehman, Hand, Ebertin
 - **Psychological** — Sasportas, Pelletier, Greene
-- **Archetypal** — Tarnas, Hillman, Moore
-- **Philosophical** — Ficino, Agrippa, Cosmos & Psyche
-- **Reference** — Planet PDFs, delineation texts
+- **Archetypal** — Tarnas, Hillman, Moore, Coppock
+- **Philosophical** — Agrippa (Three Books of Occult Philosophy), Cosmos & Psyche
+- **Reference** — Planet PDFs, delineation texts, Crowley (777 Revised)
+- **Hermetic** — Agrippa (magic squares, sigils, geomancy, Kabbalistic paths), Crowley (correspondence tables)
 
-6,500+ chunks embedded with `text-embedding-3-large` (3072 dimensions).
+**Primary store: Neo4j** (`bolt://localhost:7687`). 10,741 nodes, 93,183 relationships.
+ChromaDB was secondary and is currently broken on Python 3.14 — all queries route through Neo4j.
+
+Key texts by chunk count: Hellenistic Astrology (621), Venus (786), Gnostic I Ching (735+67), Planets in Transit (534), Mars (537), Sun (529), Moon (608), Agrippa (1,356), Saturn (471), Pluto (451), Jupiter (432), Pelletier Houses (419), Mercury (410), Uranus (405+82), 36 Faces (215), Ebertin COSI (147), Crowley 777 (121), KWML (118), Houses: Temples of the Sky (123).
 
 ---
 
@@ -292,11 +298,23 @@ stella/
 ├── setup.sh                   # Automated setup script
 ├── docker-compose.yml          # Neo4j container (optional)
 ├── build_graph.py             # Neo4j graph builder
-├── chromadb_store/            # Knowledge graph (~300MB, Git LFS)
+├── data/                      # Structured reference data
+│   └── 777-correspondences.json  # Crowley's 777: 35 rows, all 4 colour scales, tarot, Hebrew, paths
 ├── charts/                    # Chart JSON files (gitignored)
 │   ├── memory/                # Per-chart learning memory (gitignored)
 │   └── readings/              # Generated readings (gitignored)
 ├── elections/                 # 2026 electional data
+├── graph/                     # Neo4j graph scripts
+│   ├── build_graph.py         # Phase 2-3 structural graph + knowledge migration
+│   ├── ingest_missing.py      # Ingest new texts to ChromaDB + sync to Neo4j
+│   ├── ingest_books.py        # PDF book ingestion (Agrippa, Crowley) — uses .ingest-venv
+│   ├── enrich_interpretations.py  # INTERPRETS_* edge creation
+│   ├── seed_charts.py         # Seed natal charts from Helios
+│   ├── seed_wuxing.py         # Wu Xing elemental relationships
+│   ├── neo4j_tools.py         # Graph traversal utilities
+│   ├── synthesize.py          # Narrative scaffold generation
+│   └── fix_references.py      # Reference cleanup
+├── .ingest-venv/              # Python 3.13 venv for ingestion (ChromaDB broken on 3.14)
 └── docs/                      # Reference materials
     ├── KI_REFERENCE.md
     └── ZR_REFERENCE.md
@@ -360,6 +378,11 @@ narrative prose — astrology is invisible scaffolding, only the human portrait 
 
 ---
 
+## Known Issues
+
+- **ChromaDB broken on Python 3.14** — pydantic v1 incompatible. The `.ingest-venv` (Python 3.13) works for ingestion. All runtime queries use Neo4j directly via `_knowledge_query_neo4j()`.
+- **Poneglyph cron uses `convergence_ki` for day Ki** — should use `get_daily_ki` (traditional cascade). Pending update.
+
 ## Roadmap
 
 - [x] Emergent pattern detection (`discover`)
@@ -367,6 +390,11 @@ narrative prose — astrology is invisible scaffolding, only the human portrait 
 - [x] Solar arc directions (in `discover`)
 - [x] Midpoint transit detection (in `discover`)
 - [x] Convergence zone mapping (in `discover`)
+- [x] Traditional daily Ki tool (`get_daily_ki` — days-since-Lichun cascade)
+- [x] 777 Revised structured correspondence data (`data/777-correspondences.json`)
+- [x] Agrippa's Three Books of Occult Philosophy ingested (1,356 chunks)
+- [x] Crowley's 777 Revised ingested (121 chunks + structured JSON)
+- [ ] 777 correspondence lookup tool (reverse lookups by planet/tarot/colour)
 - [ ] Sabian symbol lookup tool (automated, not manual)
 - [ ] `discover` reads chart memory to weight findings
 - [ ] Solar arc calculation as standalone tool
@@ -375,3 +403,5 @@ narrative prose — astrology is invisible scaffolding, only the human portrait 
 - [ ] Temporal tracking (log predictions, check against events)
 - [ ] Evolutionary Astrology framework
 - [ ] Framework auto-detection from chart signatures
+- [ ] Geomancy casting tool (rapid-tap or manual count)
+- [ ] Seven Strings seed moment calculator (tiered election system)

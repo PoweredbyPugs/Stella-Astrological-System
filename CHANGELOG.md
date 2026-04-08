@@ -1,5 +1,64 @@
 # Stella Changelog
 
+## 2026-03-27 — Ki Changes (Mercury's Reading)
+
+### New Module: `ki_changes.py`
+- **Ki transitions as I Ching hexagrams** — every Ki level change produces changing lines (trigram transitions), and every pair of adjacent levels forms a hexagram (lower=stable, upper=changing)
+- Ki numbers mapped to Later Heaven trigrams: 1=Kan☵, 2=Kun☷, 3=Zhen☳, 4=Xun☴, 5=Kun☷, 6=Qian☰, 7=Dui☱, 8=Gen☶, 9=Li☲
+- Wu Xing phase relationships computed for each transition
+- Gnostic Book of Changes lookup from Neo4j for hexagram interpretations
+- Core insight: 64 hexagrams = Mercury's 8×8 magic square. Mercury reads the delta.
+
+### New Tools (7)
+- `get_ki_changes(target_date?, birth_date?, include_gnostic?)` — Full Ki changes at all 5 levels with hexagrams
+- `get_ki_change_schedule(birth_date?, level?, count?)` — Next N changes at a specific level
+- `ki_change_hour(birth_date?, include_gnostic?)` — Hour-level changes (~2h cycle)
+- `ki_change_day(birth_date?, include_gnostic?)` — Day-level changes (midnight)
+- `ki_change_month(birth_date?, include_gnostic?)` — Month-level changes (Sun crosses 30° boundary)
+- `ki_change_year(birth_date?, include_gnostic?)` — Year-level changes (Lichun ~Feb 4)
+- `ki_change_global(birth_date?, include_gnostic?)` — Synodic-level changes (~12yr Jupiter cycle)
+
+### Research Context
+- Mercury's magic square: 8×8, 64 cells, constant 260 (Tiriel), total 2080 (Taphthartharath)
+- 81 - 64 = 17 = Mercury's Vimshottari dasha period
+- Agrippa: Mercury's square "conduceth to memory, understanding, and divination, and to the understanding of occult things by dreams"
+- Book of Thoth: The Magus (Atu I), Intelligence of Transparency, the ape that distorts the Word
+- Total tool count: 89
+
+---
+
+## 2026-03-26 — Dasha & Timing Stack + Ki Fixes
+
+### New Module: `dasha.py`
+- **Vimshottari Dasha** — 5-level computation (maha→prana) from natal Moon nakshatra
+- **Correct lord sequence:** Ke, Ve, Su, Mo, Ma, Ra, Ju, Sa, Me (NOT Ke, Su, Mo, Ma, Ra, Ju, Sa, Me, Ve)
+- **Nakshatra transit** — live Moon position with lord, pada (Dharma/Artha/Kama/Moksha), entry/exit times
+- **Planetary glyphs:** ☋♀☉☽♂☊♃♄☿ on all dasha output
+
+### New Tools (3)
+- `get_timing_stack(name)` — Full stack: Dasha (5) + ZR Spirit/Fortune (L1-L5) + Nakshatra transit + Ki (5) + resonance detection
+- `get_dasha_periods(name)` — Dasha only (5 levels with dates)
+- `get_nakshatra_transit()` — Live Moon nakshatra/pada
+
+### Bug Fixes in `convergence_ki.py`
+- **FIXED: Month start groups were rotated.** Was `{1:5, 2:8, 3:2}`, should be `{1:8, 2:5, 3:2}`. Caused personal month to compute wrong (e.g., 6 instead of 3).
+- **FIXED: Day Ki used Moon socket crossings.** Replaced with solar day cascade (-3 from month, descends 1/day from Lichun). Moon dropped as structural per March 6 definitive architecture.
+- **FIXED: Hour Ki used ascendant gates.** Replaced with -3 cascade from day Ki, 12 double-hours/day.
+- **ADDED: Synodic Ki (Great Year)** as 5th level above Year. Jupiter perihelion cycle (~11.86yr), pulled from `get_synodic_gate()`.
+- **FIXED: Variable name collision** — `mki` was used for both month Ki and minute Ki, causing month to be overwritten.
+- **Removed:** Moon socket crossing code for day Ki, ascendant gate scanning for hour Ki, minute Ki subdivision (not a primary level).
+
+### Ki Architecture (5 levels, definitive)
+```
+Synodic  — Jupiter perihelion gate (~11.86yr), 9 gates = ~108 years
+Year     — Sun orbit, Lichun to Lichun (~365 days)
+Month    — Sun crosses 15° of each sign (~30 days)
+Day      — Solar day, descends 1/day, 365 mod 9 = 5
+Hour     — Double-hour (shíchén), 12/day, shifts 3/day
+```
+
+---
+
 ## 2026-02-02 — The Three-Axis Report System
 
 ### Major Features

@@ -173,6 +173,9 @@ Dignity score drives narrative weight more than ASC archetype. Lead with stronge
 ### Framework = Skeleton, Not Seasoning:
 When a framework is selected, it **structures the entire reading**. The framework's categories/principles become the section headings. Content (placements, midpoints, dignities) fills those sections as evidence. The framework is NOT annotations tacked onto an otherwise standard reading. Example: GTEI Cosmobiogram → Five Primordial Categories ARE the sections, midpoint pictures map into them. Psychological Narrative → developmental stages or attachment patterns ARE the sections, placements fill them.
 
+### Terminal Statements Describe People, Not Charts:
+Every reading's terminal/closing statement must describe a **person** — what they do, how they behave, what you'd observe watching them. Concrete, behavioral, falsifiable. NOT abstract properties of a chart. Anti-patterns: "The discipline is real and exalted" (astro concept), "The depth perception is structural" (abstract property). Good: "someone who appears calm at the center of complexity and periodically mistakes their own patience for paralysis." The test: could you watch this person for a week and confirm or deny each claim?
+
 ### No Cryptic Openings:
 Especially in technical readings (Cosmobiogram, Technical type), do not open with poetic/cryptic prose. State what the reading is and what it shows. Temperature 10 means novel synthesis and unexpected connections — not obfuscation or purple prose.
 

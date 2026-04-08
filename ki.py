@@ -303,6 +303,152 @@ def format_ki_report(ki_data: Dict) -> str:
 
 
 # Quick test
+def calculate_daily_ki(birth_date: date, target_date: Optional[date] = None, 
+                      lat: float = 28.5383, lon: float = -81.3792) -> Dict:
+    """
+    Calculate traditional daily Ki cascade: year, month, day, hour Ki with personal offsets.
+    
+    This implements the traditional -3 descending pattern used in 9 Star Ki:
+    - Year Ki: ((2027 - year) % 9) or 9, adjusted for Lichun (Sun at 315°)
+    - Month Ki: first_sub(year_ki) start, counts down by Sun's 30° segments from 315°
+    - Day Ki: day_starts_by_year lookup table, counts days since Lichun, descends by 1 per day
+    - Hour Ki: first_sub(day_ki) start, counts down by 2-hour blocks
+    
+    Personal Ki at each level uses Flying Star: flying_star(natal_year_ki, global_ki)
+    
+    Args:
+        birth_date: Date of birth for natal year Ki calculation
+        target_date: Target date for Ki calculation (default: today)
+        lat: Latitude for precise Lichun timing (default: Orlando)
+        lon: Longitude for precise Lichun timing (default: Orlando)
+        
+    Returns:
+        Dict with global and personal Ki at all 4 levels (year, month, day, hour)
+    """
+    import swisseph as swe
+    import zoneinfo
+    from datetime import timedelta
+    
+    # Set ephemeris path
+    swe.set_ephe_path('/mnt/baratie/baratie/sweph-service/ephemeris')
+    
+    if target_date is None:
+        target_date = date.today()
+    
+    # Convert to datetime for calculations
+    target_dt = datetime.combine(target_date, datetime.min.time())
+    target_dt = target_dt.replace(tzinfo=zoneinfo.ZoneInfo("America/New_York"))
+    
+    # Helper function for -3 descending pattern
+    def first_sub(parent):
+        return [None, 8, 5, 2, 8, 5, 2, 8, 5, 2][parent]
+    
+    # Find Lichun (Sun at 315° = 15° Aquarius) for the Ki year
+    def find_lichun(start_jd):
+        jd = start_jd
+        prev_lon = swe.calc_ut(jd, swe.SUN)[0][0]
+        while True:
+            jd += 0.5
+            lon = swe.calc_ut(jd, swe.SUN)[0][0]
+            dp = (315.0 - prev_lon) % 360
+            dc = (315.0 - lon) % 360
+            if dp < 180 and dp > 0 and dc > 180:
+                lo, hi = jd - 0.5, jd
+                for _ in range(50):
+                    mid = (lo + hi) / 2
+                    m = swe.calc_ut(mid, swe.SUN)[0][0]
+                    d = (315.0 - m) % 360
+                    if d < 180: 
+                        lo = mid
+                    else: 
+                        hi = mid
+                return (lo + hi) / 2
+            prev_lon = lon
+    
+    # Calculate Julian day for target date
+    target_jd = swe.julday(target_dt.year, target_dt.month, target_dt.day, 
+                          target_dt.hour + target_dt.minute / 60.0)
+    
+    # Find Lichun for this Ki year
+    lichun_jd = find_lichun(swe.julday(target_dt.year, 1, 1, 0.0))
+    if lichun_jd > target_jd:
+        lichun_jd = find_lichun(swe.julday(target_dt.year - 1, 1, 1, 0.0))
+    
+    # Global year Ki: ((2027 - year) % 9) or 9, adjusted for Lichun
+    year_ki = ((2027 - target_dt.year) % 9) or 9
+    if lichun_jd > target_jd:
+        year_ki = ((2027 - (target_dt.year - 1)) % 9) or 9
+    
+    # Current Sun longitude for month calculation
+    sun_lon = swe.calc_ut(target_jd, swe.SUN)[0][0]
+    month_idx = int(((sun_lon - 315 + 360) % 360) / 30)
+    
+    # Month Ki: -3 cascade from year Ki
+    month_start = first_sub(year_ki)
+    month_ki = ((month_start - month_idx - 1) % 9) + 1
+    
+    # Day Ki: 365 solar days from Lichun with local midnight boundaries
+    local_tz = zoneinfo.ZoneInfo("America/New_York")
+    day_starts_by_year = {1: 5, 9: 9, 8: 4, 7: 8, 6: 3, 5: 7, 4: 2, 3: 6, 2: 1}
+    day_start_ki = day_starts_by_year.get(year_ki, 5)
+    
+    # Convert Lichun and target to local time
+    lichun_dt = datetime.utcfromtimestamp((lichun_jd - 2440587.5) * 86400).replace(tzinfo=zoneinfo.ZoneInfo("UTC"))
+    lichun_local = lichun_dt.astimezone(local_tz)
+    target_local = target_dt.astimezone(local_tz)
+    
+    days_since_lichun = (target_local.date() - lichun_local.date()).days
+    day_ki = ((day_start_ki - days_since_lichun - 1) % 9) + 1
+    
+    # Hour Ki: 12 double-hours per day, -3 cascade from day
+    local_hour = target_local.hour + target_local.minute / 60.0
+    dh_idx = int(local_hour / 2)  # which 2-hour block (0-11)
+    hour_start = first_sub(day_ki)
+    hour_ki = ((hour_start - dh_idx - 1) % 9) + 1
+    
+    # Calculate natal year Ki
+    natal_year_ki = calculate_ki_year(birth_date.year, birth_date.month, birth_date.day)
+    
+    # Personal Ki using Flying Star method at each level
+    def flying_star(natal_ki, global_ki):
+        shift = -NUM_TO_IDX[global_ki]
+        new_idx = (NUM_TO_IDX[natal_ki] + shift) % 9
+        return FLYING_SEQUENCE[new_idx]
+    
+    personal_year_ki = flying_star(natal_year_ki, year_ki)
+    personal_month_ki = flying_star(natal_year_ki, month_ki)
+    personal_day_ki = flying_star(natal_year_ki, day_ki)
+    personal_hour_ki = flying_star(natal_year_ki, hour_ki)
+    
+    # Build result structure
+    result = {
+        "target_date": target_date.isoformat(),
+        "birth_date": birth_date.isoformat(),
+        "natal_year_ki": natal_year_ki,
+        "lichun_date": lichun_local.date().isoformat(),
+        "days_since_lichun": days_since_lichun,
+        "local_time": target_local.strftime("%H:%M"),
+        "global": {
+            "year": {"ki": year_ki, "info": KI_TRIGRAMS[year_ki]},
+            "month": {"ki": month_ki, "info": KI_TRIGRAMS[month_ki]},
+            "day": {"ki": day_ki, "info": KI_TRIGRAMS[day_ki]},
+            "hour": {"ki": hour_ki, "info": KI_TRIGRAMS[hour_ki]},
+        },
+        "personal": {
+            "year": {"ki": personal_year_ki, "info": KI_TRIGRAMS[personal_year_ki]},
+            "month": {"ki": personal_month_ki, "info": KI_TRIGRAMS[personal_month_ki]},
+            "day": {"ki": personal_day_ki, "info": KI_TRIGRAMS[personal_day_ki]},
+            "hour": {"ki": personal_hour_ki, "info": KI_TRIGRAMS[personal_hour_ki]},
+        },
+        "sequences": {
+            "global": f"{year_ki}.{month_ki}.{day_ki}.{hour_ki}",
+            "personal": f"{personal_year_ki}.{personal_month_ki}.{personal_day_ki}.{personal_hour_ki}",
+        }
+    }
+    
+    return result
+
+
 if __name__ == "__main__":
     # Test May 1, 1986 - should be 5.9.1
     print("Testing May 1, 1986 (should be 5.9.1):")
@@ -322,3 +468,12 @@ if __name__ == "__main__":
     print("Feb 5, 2026:")
     result = calculate_ki(date(2026, 2, 5))
     print(f"  Ki: {result['sequence']}")
+    print()
+    
+    # Test daily Ki cascade
+    print("Testing daily Ki cascade for Buckley (1986-05-01) on 2026-03-22:")
+    daily_result = calculate_daily_ki(date(1986, 5, 1), date(2026, 3, 22))
+    print(f"  Global: {daily_result['sequences']['global']}")
+    print(f"  Personal: {daily_result['sequences']['personal']}")
+    print(f"  Personal Day Ki: {daily_result['personal']['day']['ki']} (should be 7)")
+    print(f"  Personal Month Ki: {daily_result['personal']['month']['ki']} (should be 3)")
