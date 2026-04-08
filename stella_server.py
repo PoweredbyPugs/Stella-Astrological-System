@@ -551,6 +551,303 @@ async def get_ki_reading(
 
 
 @mcp.tool()
+async def get_daily_ki(
+    birth_date: str,
+    target_date: Optional[str] = None,
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
+) -> str:
+    """Calculate traditional daily Ki cascade with 4-level global and personal Ki.
+    
+    This implements the traditional -3 descending pattern from classical 9 Star Ki:
+    - Year Ki: Adjusted for Lichun (Sun at 315° / 15° Aquarius)
+    - Month Ki: First_sub pattern, counts down by Sun's 30° segments from 315°
+    - Day Ki: Day_starts_by_year lookup, counts days since Lichun, descends by 1
+    - Hour Ki: First_sub from day Ki, counts down by 2-hour blocks
+    
+    Personal Ki at each level uses Flying Star method: natal year Ki flying to 
+    global Ki positions. Returns both global and personal Ki at all 4 levels.
+    
+    For traditional personal daily Ki, use this tool.
+    For experimental astronomical day Ki (Moon socket crossings), use get_convergence_ki_now.
+    
+    Args:
+        birth_date: Birth date YYYY-MM-DD (required)
+        target_date: Target date YYYY-MM-DD (optional, defaults to today)
+        lat: Latitude for precise Lichun timing (optional, default: Orlando)
+        lon: Longitude for precise Lichun timing (optional, default: Orlando)
+    
+    Returns:
+        Global and personal Ki at year/month/day/hour levels with full cascade details.
+    """
+    from datetime import date as date_type
+    from ki import calculate_daily_ki
+    
+    # Parse dates
+    bd = date_type.fromisoformat(birth_date)
+    td = date_type.fromisoformat(target_date) if target_date else None
+    
+    # Set up kwargs
+    kwargs = {"birth_date": bd}
+    if td:
+        kwargs["target_date"] = td
+    if lat is not None:
+        kwargs["lat"] = lat
+    if lon is not None:
+        kwargs["lon"] = lon
+    
+    # Calculate daily Ki
+    result = calculate_daily_ki(**kwargs)
+    
+    # Format output
+    lines = []
+    lines.append("# Traditional Daily Ki Cascade")
+    lines.append(f"**Target Date:** {result['target_date']}")
+    lines.append(f"**Birth Date:** {result['birth_date']}")
+    lines.append(f"**Natal Year Ki:** {result['natal_year_ki']}")
+    lines.append(f"**Lichun Date:** {result['lichun_date']} ({result['days_since_lichun']} days ago)")
+    lines.append(f"**Local Time:** {result['local_time']}")
+    lines.append("")
+    
+    lines.append("## Global Ki (Traditional Cascade)")
+    g = result['global']
+    lines.append(f"**Sequence:** {result['sequences']['global']}")
+    lines.append(f"- **Year:** {g['year']['ki']} {g['year']['info']['trigram']} {g['year']['info']['name']} ({g['year']['info']['element']})")
+    lines.append(f"- **Month:** {g['month']['ki']} {g['month']['info']['trigram']} {g['month']['info']['name']} ({g['month']['info']['element']})")
+    lines.append(f"- **Day:** {g['day']['ki']} {g['day']['info']['trigram']} {g['day']['info']['name']} ({g['day']['info']['element']})")
+    lines.append(f"- **Hour:** {g['hour']['ki']} {g['hour']['info']['trigram']} {g['hour']['info']['name']} ({g['hour']['info']['element']})")
+    lines.append("")
+    
+    lines.append("## Personal Ki (Flying Star Method)")
+    p = result['personal']
+    lines.append(f"**Sequence:** {result['sequences']['personal']}")
+    lines.append(f"- **Year:** {p['year']['ki']} {p['year']['info']['trigram']} {p['year']['info']['name']} ({p['year']['info']['element']})")
+    lines.append(f"- **Month:** {p['month']['ki']} {p['month']['info']['trigram']} {p['month']['info']['name']} ({p['month']['info']['element']})")
+    lines.append(f"- **Day:** {p['day']['ki']} {p['day']['info']['trigram']} {p['day']['info']['name']} ({p['day']['info']['element']})")
+    lines.append(f"- **Hour:** {p['hour']['ki']} {p['hour']['info']['trigram']} {p['hour']['info']['name']} ({p['hour']['info']['element']})")
+    
+    return "\n".join(lines)
+
+
+@mcp.tool()
+async def get_ki_transition(
+    birth_date: str,
+    target_date: Optional[str] = None,
+) -> str:
+    """Show the current Ki transition — what's changing and the new hexagram.
+
+    Identifies whether a Ki boundary is being crossed (Sun at ~15° of a sign)
+    and shows the outgoing and incoming personal month Ki with hexagram derivation.
+
+    The hexagram is formed by: incoming month trigram OVER personal year trigram.
+
+    Args:
+        birth_date: Birth date YYYY-MM-DD
+        target_date: Target date YYYY-MM-DD (default: today)
+    """
+    from datetime import date as date_type, timedelta
+    from ki import (get_full_profile, KI_TRIGRAMS, calculate_personal_cycle,
+                    calculate_ki, MONTH_TABLE, _date_in_range)
+    from ki_reading import ki_to_hexagram
+
+    bd = date_type.fromisoformat(birth_date)
+    td = date_type.fromisoformat(target_date) if target_date else date_type.today()
+
+    profile = get_full_profile(bd, td)
+    natal = profile['natal']
+    cycle = profile['current_cycle']
+
+    # Check if we're near a Ki boundary (within 2 days of a period edge)
+    # Find current period and next period
+    m, d = td.month, td.day
+    current_period_idx = None
+    for i, (start, end, values) in enumerate(MONTH_TABLE):
+        if _date_in_range(m, d, start, end):
+            current_period_idx = i
+            break
+
+    # Get previous and next period personal months
+    prev_date = td - timedelta(days=5)
+    next_date = td + timedelta(days=5)
+
+    prev_cycle = calculate_personal_cycle(natal['ki_year'], prev_date)
+    next_cycle = calculate_personal_cycle(natal['ki_year'], next_date)
+
+    is_transition = (prev_cycle['personal_month'] != cycle['personal_month'] or
+                     cycle['personal_month'] != next_cycle['personal_month'])
+
+    # Current hexagram: month over year
+    current_hex = ki_to_hexagram(cycle['personal_year'], cycle['personal_month'])
+    next_hex = ki_to_hexagram(cycle['personal_year'], next_cycle['personal_month'])
+
+    pm = cycle['personal_month']
+    pm_info = KI_TRIGRAMS[pm]
+    py = cycle['personal_year']
+    py_info = KI_TRIGRAMS[py]
+    npm = next_cycle['personal_month']
+    npm_info = KI_TRIGRAMS[npm]
+    ppm = prev_cycle['personal_month']
+    ppm_info = KI_TRIGRAMS[ppm]
+
+    lines = []
+    lines.append("# 9 Star Ki Transition Report")
+    lines.append(f"**Date:** {td.isoformat()}")
+    lines.append(f"**Natal Ki:** {natal['sequence']} ({natal['ki_year']} {KI_TRIGRAMS[natal['ki_year']]['name']})")
+    lines.append(f"**Personal Year:** {py} {py_info['trigram']} {py_info['name']} ({py_info['chinese']})")
+    lines.append("")
+
+    if is_transition and ppm != pm:
+        lines.append(f"## ⚡ Ki Transition Active")
+        lines.append(f"**Outgoing Month:** {ppm} {ppm_info['trigram']} {ppm_info['name']} ({ppm_info['chinese']})")
+        lines.append(f"**Incoming Month:** {pm} {pm_info['trigram']} {pm_info['name']} ({pm_info['chinese']})")
+        lines.append("")
+        lines.append(f"### Previous Hexagram")
+        prev_hex = ki_to_hexagram(py, ppm)
+        lines.append(f"**{ppm_info['trigram']} {ppm_info['name']} over {py_info['trigram']} {py_info['name']} → Hexagram {prev_hex}**")
+        lines.append("")
+        lines.append(f"### New Hexagram")
+        lines.append(f"**{pm_info['trigram']} {pm_info['name']} over {py_info['trigram']} {py_info['name']} → Hexagram {current_hex}**")
+    elif is_transition and pm != npm:
+        lines.append(f"## ⚡ Ki Transition Approaching")
+        lines.append(f"**Current Month:** {pm} {pm_info['trigram']} {pm_info['name']} ({pm_info['chinese']})")
+        lines.append(f"**Incoming Month:** {npm} {npm_info['trigram']} {npm_info['name']} ({npm_info['chinese']})")
+        lines.append("")
+        lines.append(f"### Current Hexagram")
+        lines.append(f"**{pm_info['trigram']} {pm_info['name']} over {py_info['trigram']} {py_info['name']} → Hexagram {current_hex}**")
+        lines.append("")
+        lines.append(f"### Next Hexagram")
+        lines.append(f"**{npm_info['trigram']} {npm_info['name']} over {py_info['trigram']} {py_info['name']} → Hexagram {next_hex}**")
+    else:
+        lines.append(f"## Current Ki Period (no transition)")
+        lines.append(f"**Personal Month:** {pm} {pm_info['trigram']} {pm_info['name']} ({pm_info['chinese']})")
+        lines.append(f"**Hexagram:** {pm_info['trigram']} {pm_info['name']} over {py_info['trigram']} {py_info['name']} → Hexagram {current_hex}")
+
+    # Find the current period boundaries
+    if current_period_idx is not None:
+        start, end, _ = MONTH_TABLE[current_period_idx]
+        lines.append("")
+        lines.append(f"**Period:** {start[0]}/{start[1]} – {end[0]}/{end[1]}")
+
+    lines.append("")
+    lines.append("---")
+    lines.append(f"*Hexagram = incoming month trigram over personal year trigram*")
+    lines.append(f"*Ki boundaries align with Sun crossing ~15° of each sign*")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+async def get_convergence_ki_now(
+    target_date: Optional[str] = None,
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
+    birth_date: Optional[str] = None,
+) -> str:
+    """Get the full 7-level Ki stack using convergence socket theory.
+
+    **EXPERIMENTAL ASTRONOMICAL MODEL** — This day Ki calculation (Socket Period)
+    uses Moon crossings of convergence sockets (~9 days) instead of the traditional
+    daily cascade. This is a modern astronomical interpretation, not classical
+    9 Star Ki practice.
+
+    For traditional personal daily Ki, use `get_daily_ki` instead.
+
+    Three bodies cross the same 12 mid-sign gates (15° of each sign) at three speeds.
+    Same grid, same 12, same 15°, same 9 Ki, same remainder 3, same triad lock.
+    One relationship, three octaves.
+
+    The 7 levels:
+    ☉ SOLAR:
+      1. Year Ki — Sun completes orbit, ticks at Lichun (15° Aquarius)
+      2. Month Ki — Sun crosses 15° of each sign (~30 days)
+    ☽ LUNAR:
+      3. Lunar Gate — Moon crosses 15° of each sign (~2.3 days, 12 per sidereal month)
+      4. Socket Period (Day Ki) — Moon crosses convergence sockets (~9 days)
+    ⊕ TERRESTRIAL:
+      5. Mid-Sign Hour — Ascendant crosses 15° of each sign (~2 hrs)
+      6. Gate Ki — Ascendant crosses any 15° gate (~60 min)
+      7. Minute Ki — 1/9th subdivision of gate crossing (~6.7 min)
+
+    12-fold layers (year→month, sidereal month→lunar gate, sidereal day→mid-sign hour)
+    have remainder 3 → triad-locked, 3 unique sequences.
+    9-fold layers (socket period, gate/minute) have all 9 numbers once.
+
+    If birth_date is provided, also returns personal Ki (year/month/day) with
+    full audit trail showing global vs personal Ki at each socket crossing.
+
+    Args:
+        target_date: ISO date YYYY-MM-DD (default: today)
+        lat: Latitude for hour Ki (default: 28.5383 / Orlando)
+        lon: Longitude for hour Ki (default: -81.3792 / Orlando)
+        birth_date: Birth date YYYY-MM-DD for personal Ki calculation
+    """
+    from convergence_ki import get_convergence_ki
+    kwargs = {}
+    if target_date:
+        kwargs["target_date"] = target_date
+    if lat is not None:
+        kwargs["lat"] = lat
+    if lon is not None:
+        kwargs["lon"] = lon
+    if birth_date:
+        kwargs["birth_date"] = birth_date
+    result = get_convergence_ki(**kwargs)
+    return json.dumps(result, indent=2, default=str)
+
+
+@mcp.tool()
+async def get_synodic_gate_now(
+    target_date: Optional[str] = None,
+    birth_date: Optional[str] = None,
+) -> str:
+    """Get the Synodic Gate Ki — the ~12-year Jupiter cycle (5th level of Ki stack).
+
+    The Sun orbits the solar system's barycenter with a dominant period of
+    ~11.86 years (Jupiter's orbital period). Jupiter's perihelion marks the
+    peak gravitational coupling — the Sun and Jupiter at maximum pull.
+
+    The synodic gate starts at the Lichun preceding perihelion, following
+    the same pattern as all other Ki levels: the gate before the event.
+
+    12 years per gate, 9 Ki count, remainder 3 → triad-locked.
+    At each gate boundary, year Ki is always Earth (2, 5, 8).
+    9 synodic gates = ~108 years (a sacred number: 12 × 9).
+
+    Full stack: Synodic.Year.Month.Day.Hour
+
+    Args:
+        target_date: ISO date YYYY-MM-DD (default: today)
+        birth_date: Birth date YYYY-MM-DD for personal synodic Ki
+    """
+    from convergence_ki import get_synodic_gate
+    kwargs = {}
+    if target_date:
+        kwargs["target_date"] = target_date
+    if birth_date:
+        kwargs["birth_date"] = birth_date
+    result = get_synodic_gate(**kwargs)
+    return json.dumps(result, indent=2, default=str)
+
+
+@mcp.tool()
+async def get_natal_gates(name: str) -> str:
+    """Map a natal chart's planets to their 15° gates and permanent San Cai triads.
+
+    Shows which gate each planet falls in, its locked triad (Man/Earth/Heaven),
+    possible Ki numbers, and whether it sits on a convergence socket.
+
+    The 24 gates (every 15° of the ecliptic) each permanently belong to one triad.
+    This mapping is structural — it doesn't change with time or location.
+
+    Args:
+        name: Chart name (e.g., 'chris', 'lisa', 'betsy')
+    """
+    from convergence_ki import get_natal_gates as _get_natal_gates
+    result = _get_natal_gates(name)
+    return json.dumps(result, indent=2, default=str)
+
+
+@mcp.tool()
 async def get_transits_now(
     name: str,
     major: Optional[bool] = None,
@@ -2487,6 +2784,50 @@ Voice: Measured, clear-eyed, grounding. Like Meditations written for one person.
 
 NOTE: Knowledge base needs more Stoic texts for full support.""",
     },
+    "wuxing": {
+        "label": "Wu Xing (五行)",
+        "description": "Five Elements cosmology. Planets as elemental embodiments. Generating/overcoming cycles.",
+        "instructions": """FRAMEWORK: WU XING (五行 — FIVE MOVEMENTS)
+
+BASELINE: Hellenistic techniques (sect, dignity, depositors, lots, timing) provide
+the rigorous foundation. Wu Xing layers elemental cosmology on top.
+
+The five visible planets ARE the Five Elements made manifest in the sky:
+- Mercury = Water (水 Shuǐ) — Kidneys/Bladder — Fear↔Willpower — Wisdom
+- Venus = Metal (金 Jīn) — Lungs/Large Intestine — Grief↔Righteousness — Integrity
+- Mars = Fire (火 Huǒ) — Heart/Small Intestine — Agitation↔Joy — Propriety
+- Jupiter = Wood (木 Mù) — Liver/Gallbladder — Frustration↔Kindness — Benevolence
+- Saturn = Earth (土 Tǔ) — Spleen/Stomach — Worry↔Trust — Faithfulness
+
+TWO CORE CYCLES:
+Generating (相生) — Mother feeds Child:
+  Wood→Fire→Earth→Metal→Water→Wood
+Overcoming (相克) — Controller checks Controlled:
+  Wood→Earth→Water→Fire→Metal→Wood
+
+7-STEP METHOD:
+1. Map planets to elements (Mercury=Water, Venus=Metal, Mars=Fire, Jupiter=Wood, Saturn=Earth)
+2. Assess elemental dominance — which elements are concentrated by dignity/angularity?
+   That element's wisdom AND challenge define core themes.
+3. Identify MISSING elements — absence reveals growth edges and constitutional vulnerabilities.
+4. Read elemental interactions between planets — generating = support,
+   overcoming = productive tension, weakening = depletion.
+5. Apply directional/seasonal axis — angular planets carry directional meaning.
+6. Body-mind-emotion matrix — for each dominant element: organs, challenging emotion,
+   wisdom emotion, virtue being cultivated.
+7. Transit reading — apply generating/overcoming logic to transiting planets over natal.
+   Jupiter (Wood) transit to natal Mars (Fire) generates — expansion fuels drive.
+   Saturn (Earth) transit to natal Mercury (Water) overcomes — structure dams flow.
+
+NARRATIVE RULES:
+- Use the DUAL EMOTION for each element (challenge + wisdom as two faces of the same energy)
+- Organ systems are diagnostic, not decorative — they map to real somatic patterns
+- The virtue is the developmental trajectory, not a given
+- Missing elements are as important as dominant ones
+- Integrate with dignity scores: a planet in domicile embodies its element's WISDOM emotion;
+  a planet in detriment tends toward the CHALLENGE emotion
+- Voice: embodied, precise, integrative. Clinical clarity with elemental poetry.""",
+    },
 }
 
 # Legacy compatibility — PERSPECTIVES maps to the new FRAMEWORKS
@@ -2510,6 +2851,10 @@ ADD_ONS = {
     "ki": {
         "label": "+Ki",
         "description": "9 Star Ki cycle section (current personal year/month)",
+    },
+    "wuxing": {
+        "label": "+Wu Xing",
+        "description": "Five Elements analysis (elemental dominance, missing elements, generating/overcoming cycles, body-mind-emotion matrix)",
     },
 }
 
@@ -4508,13 +4853,15 @@ if NEO4J_AVAILABLE:
         return json.dumps(result, indent=2)
 
     @mcp.tool()
-    async def graph_query(cypher: str) -> str:
-        """Execute a raw Cypher query against the knowledge graph.
+    async def graph_cypher(cypher: str) -> str:
+        """Execute a raw Cypher query against the Neo4j knowledge graph.
         Use for custom traversals and analysis not covered by other tools.
+        Node labels: Interpretation, Planet, Sign, House, Author, Layer, Technique, NatalPlacement, Aspect, Decan, Term, Insight, Chart, Element
+        Interpretation properties: text, source_title, trust_tier, layer, chunk_id, tradition, tags (source_title NOT source)
         Examples:
         - MATCH (p:NatalPlacement {chart:'chris'})-[:DEPOSITS_TO*]->(t) RETURN p.planet, t.planet
-        - MATCH (i:Interpretation)-[:DESCRIBES]->(p:Planet {name:'Mars'})-[:EXALTED_IN]->(s:Sign) RETURN i.text LIMIT 3
-        - MATCH path = shortestPath((a:Planet {name:'Sun'})-[*]-(b:Planet {name:'Pluto'})) RETURN path"""
+        - MATCH (i:Interpretation) WHERE i.source_title CONTAINS 'Anthology' RETURN i.text LIMIT 3
+        - MATCH (i:Interpretation)-[:DESCRIBES]->(p:Planet {name:'Mars'})-[:EXALTED_IN]->(s:Sign) RETURN i.text LIMIT 3"""
         result = query_graph(cypher)
         return json.dumps(result, indent=2, default=str)
 
@@ -4913,6 +5260,1128 @@ async def autopoietic_status(session_id: str) -> dict:
             f"Submit each with autopoietic_submit(pass_type='diverge')."
         ),
     }
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# DASHA & TIMING STACK
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@mcp.tool()
+async def get_timing_stack(
+    name: str,
+    target_date: Optional[str] = None,
+    target_time: Optional[str] = None,
+) -> str:
+    """Get the full timing stack for a stored chart.
+
+    Combines four timing systems:
+
+    DASHA (Vimshottari, mathematical, birth-seeded):
+      1. Maha — lord of the era (years-decades)
+      2. Bhukti — lord of the season (months-years)
+      3. Pratyantara — lord of the push (weeks-months)
+      4. Sookshma — lord of the day (days-weeks)
+      5. Prana — lord of the hour (hours)
+
+    ZODIACAL RELEASING (Hellenistic, lot-based):
+      Spirit (career/action) and Fortune (body/circumstances)
+      L1-L5 periods with peak detection and loosing of the bond
+
+    NAKSHATRA TRANSIT (astronomical, live Moon position):
+      6. Nakshatra lord — the day quality (~24 hours)
+      7. Pada — the sub-quality (~6 hours): Dharma/Artha/Kama/Moksha
+
+    KI (solar-terrestrial cascade):
+      Year / Month / Day / Hour
+
+    Also detects resonances (e.g., transit Moon in same lord's nakshatra
+    as a dasha level).
+
+    Vimshottari lord sequence: Ketu(7), Venus(20), Sun(6), Moon(10),
+    Mars(7), Rahu(18), Jupiter(16), Saturn(19), Mercury(17) = 120 years.
+
+    Args:
+        name: Chart name (e.g., 'chris', 'lisa', 'betsy')
+        target_date: YYYY-MM-DD (default: today)
+        target_time: HH:MM:SS (default: now)
+    """
+    from dasha import get_full_timing_stack
+    result = get_full_timing_stack(name, target_date, target_time)
+    return json.dumps(result, indent=2, default=str)
+
+
+@mcp.tool()
+async def get_dasha_periods(
+    name: str,
+    target_date: Optional[str] = None,
+    target_time: Optional[str] = None,
+) -> str:
+    """Get the 5-level Vimshottari dasha stack for a stored chart.
+
+    Returns maha through prana dashas with lord, position (1-9),
+    start/end dates, and duration. Uses natal Moon nakshatra to
+    seed the sequence.
+
+    Vimshottari lord sequence (nakshatra order):
+      1=Ketu(7yr), 2=Venus(20yr), 3=Sun(6yr), 4=Moon(10yr),
+      5=Mars(7yr), 6=Rahu(18yr), 7=Jupiter(16yr), 8=Saturn(19yr),
+      9=Mercury(17yr). Total = 120 years.
+
+    Each sub-level divides the parent period proportionally by the
+    same 9 lords starting from the parent's lord.
+
+    Args:
+        name: Chart name (e.g., 'chris', 'lisa')
+        target_date: YYYY-MM-DD (default: today)
+        target_time: HH:MM:SS (default: now)
+    """
+    from dasha import get_full_timing_stack
+    import os as _os
+
+    chart_path = _os.path.join(_os.path.dirname(__file__) or '.', 'charts', f'{name}.json')
+    if not _os.path.exists(chart_path):
+        return json.dumps({'error': f'Chart not found: {name}'})
+
+    with open(chart_path) as f:
+        chart = json.load(f)
+
+    birth_data = chart.get('birthData', {})
+    birth_date = birth_data.get('date')
+    moon_planet = next((p for p in chart.get('planets', []) if p['name'] == 'Moon'), None)
+    if not birth_date or not moon_planet:
+        return json.dumps({'error': 'Chart missing birth date or Moon data'})
+
+    from dasha import compute_dasha_stack
+    result = compute_dasha_stack(birth_date, float(moon_planet['longitude']),
+                                 target_date, target_time)
+    return json.dumps(result, indent=2, default=str)
+
+
+@mcp.tool()
+async def get_nakshatra_transit(
+    target_date: Optional[str] = None,
+    target_time: Optional[str] = None,
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
+) -> str:
+    """Get the Moon's current nakshatra position as a live transit layer.
+
+    Returns the nakshatra name, number (1-27), dasha lord, pada (1-4),
+    pada aim (Dharma/Artha/Kama/Moksha), entry/exit times, and duration.
+
+    This is levels 6-7 of the timing stack — the astronomical layer
+    determined by where the Moon actually is right now.
+
+    Each nakshatra = 13°20' of ecliptic. Each pada = 3°20'.
+    Moon transits one nakshatra in roughly 24 hours, one pada in ~6 hours.
+
+    Args:
+        target_date: YYYY-MM-DD (default: today)
+        target_time: HH:MM (default: now)
+        lat: Latitude (default: 28.5383 / Orlando)
+        lon: Longitude (default: -81.3792 / Orlando)
+    """
+    from dasha import get_current_nakshatra_transit
+    kwargs = {}
+    if target_date:
+        kwargs['target_date'] = target_date
+    if target_time:
+        kwargs['target_time'] = target_time
+    if lat is not None:
+        kwargs['lat'] = lat
+    if lon is not None:
+        kwargs['lon'] = lon
+    result = get_current_nakshatra_transit(**kwargs)
+    return json.dumps(result, indent=2, default=str)
+
+
+@mcp.tool()
+async def get_ki_changes(
+    target_date: str = None,
+    birth_date: str = None,
+    include_gnostic: bool = False,
+) -> str:
+    """Compute Ki changes at all levels — Mercury's reading of the Ki field.
+
+    Shows what's transitioning, not just what IS. For each Ki level
+    (synodic, year, month, day, hour):
+    - Current and next Ki number with trigram
+    - When it changes next
+    - Changing lines (trigram transitions, yin→yang / yang→yin)
+    - Wu Xing phase relationship of the transition
+
+    For each adjacent pair of levels, forms the I Ching hexagram
+    (lower trigram = slower/stable level, upper = faster/changing level)
+    with King Wen sequence number.
+
+    Optionally looks up Gnostic Book of Changes interpretations for
+    each hexagram formed.
+
+    Args:
+        target_date: ISO date YYYY-MM-DD (default: now)
+        birth_date: Birth date YYYY-MM-DD for personal Ki overlay
+        include_gnostic: If True, look up Gnostic I Ching text for each hexagram
+    """
+    from ki_changes import (
+        get_ki_changes as _get_ki_changes,
+        format_ki_changes as _format,
+        format_ki_changes_full as _format_full,
+    )
+    data = _get_ki_changes(target_date=target_date, birth_date=birth_date)
+
+    if include_gnostic:
+        return _format_full(data, personal=bool(birth_date))
+    else:
+        return _format(data)
+
+
+@mcp.tool()
+async def get_ki_change_schedule(
+    birth_date: str = None,
+    level: str = "day",
+    count: int = 9,
+) -> str:
+    """Show the next N Ki changes at a specific level with hexagram transitions.
+
+    Useful for seeing the rhythm of changes — when does Ki cycle through
+    all 9 numbers? What hexagrams form along the way?
+
+    Args:
+        birth_date: Birth date YYYY-MM-DD for personal Ki
+        level: Which level to track: 'hour', 'day', 'month', 'year'
+        count: Number of upcoming changes to show (default 9 = one full cycle)
+    """
+    from ki_changes import get_ki_changes as _get_ki_changes, _changing_lines, _hexagram_from_ki, KI_TO_TRIGRAM
+    from convergence_ki import _flying_star, _year_ki
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo("America/New_York")
+    now = datetime.now(tz)
+
+    if level not in ("hour", "day", "month", "year"):
+        return f"Invalid level '{level}'. Use: hour, day, month, year"
+
+    # Get current state
+    data = _get_ki_changes(birth_date=birth_date)
+    current_ki = data["global"]["current"][level]
+
+    lines = []
+    lines.append(f"═══ KI CHANGE SCHEDULE — {level.upper()} ═══")
+    lines.append(f"Starting: Ki {current_ki} {KI_TO_TRIGRAM[current_ki]['symbol']} {KI_TO_TRIGRAM[current_ki]['name']}")
+    lines.append(f"Next {count} changes:\n")
+
+    ki = current_ki
+    # Determine step interval
+    if level == "hour":
+        step = timedelta(hours=2)
+    elif level == "day":
+        step = timedelta(days=1)
+    elif level == "month":
+        step = timedelta(days=30)  # approximate
+    elif level == "year":
+        step = timedelta(days=365)
+
+    cursor = now
+    natal_yki = None
+    if birth_date:
+        from datetime import date
+        bd = date.fromisoformat(birth_date)
+        natal_yki = _year_ki(bd.year, bd.month, bd.day)
+
+    for i in range(count):
+        next_ki = (ki - 1) % 9
+        if next_ki <= 0:
+            next_ki += 9
+
+        change = _changing_lines(ki, next_ki)
+        changes_str = ", ".join(
+            f"L{c['line']} {c['direction']}" for c in change["changing_lines"]
+        ) if change["num_changes"] > 0 else "same trigram"
+
+        cursor += step
+        line = (f"  {i+1}. Ki {ki} {KI_TO_TRIGRAM[ki]['symbol']}"
+                f" → {next_ki} {KI_TO_TRIGRAM[next_ki]['symbol']}"
+                f"  [{changes_str}]")
+
+        if natal_yki:
+            p_curr = _flying_star(natal_yki, ki)
+            p_next = _flying_star(natal_yki, next_ki)
+            line += f"  (personal: {p_curr}→{p_next})"
+
+        lines.append(line)
+        ki = next_ki
+
+    lines.append(f"\n9 changes = one full cycle. Ki descends by 1 each {level}.")
+    return "\n".join(lines)
+
+
+# ── Individual Ki change tools (one per level) ──
+
+def _ki_change_single_level(level: str, birth_date: str = None,
+                             include_gnostic: bool = False) -> str:
+    """Shared implementation for individual Ki change level tools.
+
+    When include_gnostic=True, uses the full format with line diagrams,
+    changing lines, transformed hexagram, and Gnostic I Ching text including
+    all translator versions, Editor commentary, and lettered statements.
+    """
+    from ki_changes import (
+        get_ki_changes as _get_ki_changes,
+        format_ki_changes_full as _format_full,
+        _changing_lines, _hexagram_from_ki, _wu_xing_relationship,
+        KI_TO_TRIGRAM, lookup_hexagram_gnostic, LEVEL_NAMES,
+        _get_transformed_hex,
+    )
+    from convergence_ki import TRIAD_OF
+
+    data = _get_ki_changes(birth_date=birth_date)
+
+    # If gnostic requested, use the full format filtered to this level's pairs
+    if include_gnostic:
+        # Use full format but we'll build it for just this level
+        use_personal = bool(birth_date) and data.get("personal")
+
+        if use_personal:
+            p = data["personal"]
+            ki_current = p["current"]
+            ki_next = p["next"]
+            hex_source = p.get("hexagrams", {})
+        else:
+            ki_current = data["global"]["current"]
+            ki_next = data["global"]["next"]
+            hex_source = data.get("hexagrams", {})
+
+        pair_map = {
+            "synodic": [("synodic", "year", "synodic_year")],
+            "year": [("synodic", "year", "synodic_year"), ("year", "month", "year_month")],
+            "month": [("year", "month", "year_month"), ("month", "day", "month_day")],
+            "day": [("month", "day", "month_day"), ("day", "hour", "day_hour")],
+            "hour": [("day", "hour", "day_hour")],
+        }
+
+        lines = []
+        lines.append(f"═══ KI CHANGE — {level.upper()} ═══")
+
+        # Show current level info
+        lc = data["level_changes"][level] if not use_personal else p["level_changes"].get(level, data["level_changes"][level])
+        curr = lc["current"]
+        nxt = lc["next"]
+        lines.append(f"  Current: {curr['ki']} {curr['symbol']} {curr['trigram']} ({TRIAD_OF[curr['ki']]})")
+        lines.append(f"  Next:    {nxt['ki']} {nxt['symbol']} {nxt['trigram']} ({TRIAD_OF[nxt['ki']]})")
+        lines.append(f"  Changes: {lc['changes_at']}")
+        lines.append("")
+
+        for lower_name, upper_name, pair_key in pair_map.get(level, []):
+            if pair_key not in hex_source:
+                continue
+
+            hx = hex_source[pair_key]
+            lower_ki = hx["lower"]["ki"]
+            upper_ki = hx["upper"]["ki"]
+            next_upper_ki = ki_next.get(upper_name)
+            if next_upper_ki is None:
+                continue
+
+            lower_tri = KI_TO_TRIGRAM[lower_ki]
+            upper_tri = KI_TO_TRIGRAM[upper_ki]
+            next_upper_tri = KI_TO_TRIGRAM[next_upper_ki]
+
+            hex_lines_val = lower_tri["lines"] + upper_tri["lines"]
+            next_hex_lines = lower_tri["lines"] + next_upper_tri["lines"]
+
+            changing = []
+            for i in range(6):
+                if hex_lines_val[i] != next_hex_lines[i]:
+                    direction = "yin→yang" if next_hex_lines[i] == 1 else "yang→yin"
+                    changing.append({"line": i + 1, "direction": direction})
+
+            transformed_num = _get_transformed_hex(lower_ki, next_upper_ki)
+
+            lines.append(f"{'═' * 60}")
+            lines.append(f"HEXAGRAM {hx['hexagram']} — {lower_name.upper()}/{upper_name.upper()}")
+            lines.append(f"  {upper_tri['symbol']} {upper_tri['name']} above  (Ki {upper_ki})")
+            lines.append(f"  {lower_tri['symbol']} {lower_tri['name']} below  (Ki {lower_ki})")
+            lines.append(f"  Wu Xing: {hx.get('wu_xing', '')}")
+            lines.append("")
+
+            for i in range(5, -1, -1):
+                val = hex_lines_val[i]
+                is_changing = any(c["line"] == i + 1 for c in changing)
+                sym = "━━━━━" if val == 1 else "━━ ━━"
+                marker = ""
+                if is_changing:
+                    ch = [c for c in changing if c["line"] == i + 1][0]
+                    marker = f" ← ({ch['direction']})"
+                lines.append(f"  Line {i+1}: {sym}{marker}")
+
+            lines.append("")
+            if changing:
+                ch_str = ", ".join(str(c["line"]) for c in changing)
+                lines.append(f"  Changing lines: {ch_str}")
+                lines.append(f"  → Transforms to: Hexagram {transformed_num}")
+            else:
+                lines.append(f"  No changing lines (pure hexagram)")
+            lines.append("")
+
+            # Gnostic lookup
+            cl = [c["line"] for c in changing] if changing else None
+            gnostic = lookup_hexagram_gnostic(hx["hexagram"], changing_lines=cl)
+
+            if gnostic.get("judgment"):
+                lines.append(f"  JUDGMENT:")
+                for jl in gnostic["judgment"][:800].split("\n"):
+                    lines.append(f"  {jl}")
+                lines.append("")
+
+            if gnostic.get("line_readings"):
+                for line_num, reading in sorted(gnostic["line_readings"].items()):
+                    lines.append(f"  ── LINE {line_num} ──")
+                    for rl in reading.split("\n"):
+                        lines.append(f"  {rl}")
+                    lines.append("")
+
+            lines.append("")
+
+        return "\n".join(lines)
+
+    # Non-gnostic compact format (original)
+    g = data["global"]
+    lc = data["level_changes"][level]
+
+    lines = []
+    curr = lc["current"]
+    nxt = lc["next"]
+    lines.append(f"═══ KI CHANGE — {level.upper()} ═══")
+    lines.append(f"  Current: {curr['ki']} {curr['symbol']} {curr['trigram']} ({TRIAD_OF[curr['ki']]})")
+    lines.append(f"  Next:    {nxt['ki']} {nxt['symbol']} {nxt['trigram']} ({TRIAD_OF[nxt['ki']]})")
+    lines.append(f"  Changes: {lc['changes_at']}")
+    lines.append(f"  Wu Xing: {lc['wu_xing']}")
+
+    if lc["num_changes"] > 0:
+        ch_str = ", ".join(f"L{c['line']} {c['direction']}" for c in lc["changing_lines"])
+        lines.append(f"  Lines:   {ch_str}")
+    else:
+        lines.append(f"  Lines:   no change (same trigram)")
+
+    lines.append("")
+    lines.append("── HEXAGRAMS ──")
+
+    pair_map = {
+        "synodic": [("synodic", "year", "synodic_year")],
+        "year": [("synodic", "year", "synodic_year"), ("year", "month", "year_month")],
+        "month": [("year", "month", "year_month"), ("month", "day", "month_day")],
+        "day": [("month", "day", "month_day"), ("day", "hour", "day_hour")],
+        "hour": [("day", "hour", "day_hour")],
+    }
+
+    for lower_name, upper_name, pair_key in pair_map.get(level, []):
+        if pair_key in data["hexagrams"]:
+            hx = data["hexagrams"][pair_key]
+            lines.append(f"  {hx['pair']}:")
+            lines.append(f"    {hx['upper']['symbol']} {hx['upper']['trigram']} above  (Ki {hx['upper']['ki']})")
+            lines.append(f"    {hx['lower']['symbol']} {hx['lower']['trigram']} below  (Ki {hx['lower']['ki']})")
+            lines.append(f"    = Hexagram {hx['hexagram']}  |  {hx['wu_xing']}")
+            lines.append("")
+
+    if data.get("personal"):
+        p = data["personal"]
+        lines.append("── PERSONAL ──")
+        if level in p.get("level_changes", {}):
+            plc = p["level_changes"][level]
+            pc = plc["current"]
+            pn = plc["next"]
+            lines.append(f"  Current: {pc['ki']} {pc['symbol']} {pc['trigram']}")
+            lines.append(f"  Next:    {pn['ki']} {pn['symbol']} {pn['trigram']}")
+            lines.append(f"  Wu Xing: {plc['wu_xing']}")
+            if plc["num_changes"] > 0:
+                ch_str = ", ".join(f"L{c['line']} {c['direction']}" for c in plc["changing_lines"])
+                lines.append(f"  Lines:   {ch_str}")
+
+        if p.get("hexagrams"):
+            for lower_name, upper_name, pair_key in pair_map.get(level, []):
+                if pair_key in p["hexagrams"]:
+                    hx = p["hexagrams"][pair_key]
+                    lines.append(f"  Personal {hx['pair']}: Hex {hx['hexagram']}"
+                                  f" ({hx['lower']['symbol']}/{hx['upper']['symbol']})")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+async def ki_change_hour(
+    birth_date: str = None,
+    include_gnostic: bool = False,
+) -> str:
+    """Ki change at the HOUR level — fastest cycle (~2 hours per shift).
+
+    Shows current hour Ki, what it's becoming, when it changes,
+    the changing lines, and hexagrams formed with the day level.
+    Hour = the ascendant's rhythm, Mercury's most rapid pulse.
+
+    Args:
+        birth_date: Birth date YYYY-MM-DD for personal Ki
+        include_gnostic: Pull Gnostic I Ching text for hexagrams
+    """
+    return _ki_change_single_level("hour", birth_date, include_gnostic)
+
+
+@mcp.tool()
+async def ki_change_day(
+    birth_date: str = None,
+    include_gnostic: bool = False,
+) -> str:
+    """Ki change at the DAY level — daily solar rhythm.
+
+    Shows current day Ki, what it's becoming at midnight,
+    the changing lines, and hexagrams formed with month and hour levels.
+    Day = the Sun's daily pulse through the -3 cascade from Lichun.
+
+    Args:
+        birth_date: Birth date YYYY-MM-DD for personal Ki
+        include_gnostic: Pull Gnostic I Ching text for hexagrams
+    """
+    return _ki_change_single_level("day", birth_date, include_gnostic)
+
+
+@mcp.tool()
+async def ki_change_month(
+    birth_date: str = None,
+    include_gnostic: bool = False,
+) -> str:
+    """Ki change at the MONTH level — solar month (~30 days per shift).
+
+    Shows current month Ki, what it's becoming when Sun crosses
+    the next 30° boundary, changing lines, and hexagrams formed
+    with year and day levels.
+
+    Args:
+        birth_date: Birth date YYYY-MM-DD for personal Ki
+        include_gnostic: Pull Gnostic I Ching text for hexagrams
+    """
+    return _ki_change_single_level("month", birth_date, include_gnostic)
+
+
+@mcp.tool()
+async def ki_change_year(
+    birth_date: str = None,
+    include_gnostic: bool = False,
+) -> str:
+    """Ki change at the YEAR level — annual cycle (changes at Lichun ~Feb 4).
+
+    Shows current year Ki, what it's becoming next Lichun,
+    the changing lines, and hexagrams formed with synodic and month levels.
+    Year = the Sun's annual pulse, the foundational Ki number.
+
+    Args:
+        birth_date: Birth date YYYY-MM-DD for personal Ki
+        include_gnostic: Pull Gnostic I Ching text for hexagrams
+    """
+    return _ki_change_single_level("year", birth_date, include_gnostic)
+
+
+@mcp.tool()
+async def ki_change_global(
+    birth_date: str = None,
+    include_gnostic: bool = False,
+) -> str:
+    """Ki change at the SYNODIC (global) level — Jupiter's ~12-year cycle.
+
+    Shows current synodic Ki, what it's becoming at the next
+    Jupiter perihelion gate, and the hexagram formed with the year level.
+    Synodic = the slowest Ki pulse, the Great Year (~108 years for full cycle).
+
+    Args:
+        birth_date: Birth date YYYY-MM-DD for personal Ki
+        include_gnostic: Pull Gnostic I Ching text for hexagrams
+    """
+    return _ki_change_single_level("synodic", birth_date, include_gnostic)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# MOON SQUARE DAILY NAKSHATRA TRACKER
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+_MOON_SQUARE = [
+    [37,78,29,70,21,62,13,54,5],
+    [6,38,79,30,71,22,63,14,46],
+    [47,7,39,80,31,72,23,55,15],
+    [16,48,8,40,81,32,64,24,56],
+    [57,17,49,9,41,73,33,65,25],
+    [26,58,18,50,1,42,74,34,66],
+    [67,27,59,10,51,2,43,75,35],
+    [36,68,19,60,11,52,3,44,76],
+    [77,28,69,20,61,12,53,4,45],
+]
+
+_MOON_NAKSHATRAS = [
+    ("Ashwini", "☋Ketu"),      ("Bharani", "♀Venus"),
+    ("Krittika", "☉Sun"),      ("Rohini", "☽Moon"),
+    ("Mrigashira", "♂Mars"),   ("Ardra", "☊Rahu"),
+    ("Punarvasu", "♃Jupiter"), ("Pushya", "♄Saturn"),
+    ("Ashlesha", "☿Mercury"),  ("Magha", "☋Ketu"),
+    ("Purva Phalguni", "♀Venus"), ("Uttara Phalguni", "☉Sun"),
+    ("Hasta", "☽Moon"),        ("Chitra", "♂Mars"),
+    ("Swati", "☊Rahu"),        ("Vishakha", "♃Jupiter"),
+    ("Anuradha", "♄Saturn"),   ("Jyeshtha", "☿Mercury"),
+    ("Mula", "☋Ketu"),         ("Purva Ashadha", "♀Venus"),
+    ("Uttara Ashadha", "☉Sun"), ("Shravana", "☽Moon"),
+    ("Dhanishta", "♂Mars"),    ("Shatabhisha", "☊Rahu"),
+    ("Purva Bhadrapada", "♃Jupiter"), ("Uttara Bhadrapada", "♄Saturn"),
+    ("Revati", "☿Mercury"),
+]
+
+_MOON_PADAS = ["Dharma", "Artha", "Kama"]  # 3 material padas
+
+# Epoch: Lichun 2022 (start of current Great Year / synodic gate 8)
+_MOON_SQUARE_EPOCH = datetime(2022, 2, 3).date()
+
+# Build value → grid position map
+_MOON_VAL_POS = {}
+for _r in range(9):
+    for _c in range(9):
+        _MOON_VAL_POS[_MOON_SQUARE[_r][_c]] = (_r, _c)
+
+
+def _moon_square_day(target_date=None):
+    """Compute Moon square daily nakshatra position.
+
+    The Moon's 9×9 magic square (81 cells) maps to 27 nakshatras × 3 material padas.
+    Starting from Chitra (nakshatra 14, the center) at the Great Year epoch (Lichun 2022),
+    the pointer advances by 3 cells per day through the walk order.
+    Full cycle = 27 days. The walk starts at value 40 (first pada of Chitra).
+
+    Returns dict with current position, nakshatra, grid coordinates, and cycle info.
+    """
+    if target_date is None:
+        target_date = datetime.now().date()
+    elif isinstance(target_date, str):
+        target_date = datetime.strptime(target_date, "%Y-%m-%d").date()
+
+    days_since = (target_date - _MOON_SQUARE_EPOCH).days
+    cycle_day = days_since % 27  # 0-26
+    full_cycles = days_since // 27
+
+    # Walk values: starting from 40, advance by 3 per day
+    start_val = ((39 + days_since * 3) % 81) + 1
+    vals = [((39 + days_since * 3 + i) % 81) + 1 for i in range(3)]
+
+    # Nakshatra
+    nak_idx = (13 + cycle_day) % 27  # 0-based, starts at Chitra (13)
+    nak_name, nak_lord = _MOON_NAKSHATRAS[nak_idx]
+
+    # Grid positions for the 3 values
+    positions = []
+    for v in vals:
+        r, c = _MOON_VAL_POS[v]
+        positions.append({"value": v, "row": r, "col": c,
+                          "pada": _MOON_PADAS[(v - 1) % 3]})
+
+    # Digital root of center value
+    center_val = vals[1]  # middle of the 3
+    dr = (center_val - 1) % 9 + 1
+
+    return {
+        "date": target_date.isoformat(),
+        "days_since_epoch": days_since,
+        "cycle": {
+            "day_in_cycle": cycle_day,
+            "full_cycles_completed": full_cycles,
+            "cycle_length_days": 27,
+            "epoch": _MOON_SQUARE_EPOCH.isoformat(),
+            "epoch_event": "Lichun 2022 (Great Year gate 8, Gen ☶ Mountain)",
+        },
+        "nakshatra": {
+            "number": nak_idx + 1,
+            "name": nak_name,
+            "lord": nak_lord,
+        },
+        "walk_values": vals,
+        "padas": [
+            {"value": p["value"], "pada": p["pada"],
+             "grid": f"[{p['row']},{p['col']}]"}
+            for p in positions
+        ],
+        "digital_root": dr,
+        "grid_positions": positions,
+    }
+
+
+@mcp.tool()
+async def get_moon_square_transit(
+    name: str = None,
+    target_date: str = None,
+    target_time: str = None,
+) -> str:
+    """Moon Square daily dasha transit — where is the Moon in the grid right now?
+
+    Uses the ACTUAL Moon's nakshatra position (no epoch, no drift) to determine
+    which cells and dasha lord territory the Moon is activating in the 9×9 grid.
+    If a name is given (stored chart), shows how the transit relates to the
+    person's active maha dasha and bhukti.
+
+    Each nakshatra = 3 cells in the Moon square. Each dasha lord owns 9 cells
+    (3 nakshatras). The Moon transits one nakshatra per ~day, activating a
+    different lord's territory daily.
+
+    Args:
+        name: Person's chart name (for dasha context). Optional.
+        target_date: YYYY-MM-DD (default today)
+        target_time: HH:MM (default now)
+    """
+    from dasha import get_current_nakshatra_transit, compute_dasha_stack
+
+    # Get actual Moon position
+    kwargs = {}
+    if target_date:
+        kwargs['target_date'] = target_date
+    if target_time:
+        kwargs['target_time'] = target_time
+    transit = get_current_nakshatra_transit(**kwargs)
+
+    nak_num = transit['nakshatra']['number']
+    nak_name = transit['nakshatra']['name']
+    nak_lord = transit['nakshatra']['lord']
+    pada_num = transit['pada']['number']
+    pada_aim = transit['pada']['aim']
+
+    # Map to Moon square
+    lord_idx = (nak_num - 1) % 9
+    transit_lord = _MOON_NAKSHATRAS[(nak_num - 1)][1]  # lord with glyph
+    base_cell = (nak_num - 1) * 3 + 1
+    cells = [base_cell, base_cell + 1, base_cell + 2]
+
+    # Current pada → active cell (pada 4 = moksha, off-grid)
+    if pada_num <= 3:
+        active_cell = base_cell + (pada_num - 1)
+        active_pada = _MOON_PADAS[pada_num - 1]
+    else:
+        active_cell = None
+        active_pada = "Moksha (off-grid)"
+
+    # Grid positions
+    cell_positions = []
+    for c in cells:
+        r, col = _MOON_VAL_POS[c]
+        cell_positions.append({"value": c, "row": r, "col": col})
+
+    # Digital root of active cell
+    dr = ((active_cell - 1) % 9 + 1) if active_cell else None
+
+    lines = []
+    lines.append(f"☽ Moon Square Transit — {transit['moon']['degree']}")
+    lines.append(f"")
+    lines.append(f"  Nakshatra: {nak_name} (#{nak_num}) — {transit_lord}")
+    lines.append(f"  Pada: {pada_num} ({pada_aim})")
+    lines.append(f"  Grid cells: {cells}")
+    if active_cell:
+        r, col = _MOON_VAL_POS[active_cell]
+        lines.append(f"  Active cell: {active_cell} at [{r},{col}] ({active_pada}) DR={dr}")
+    else:
+        lines.append(f"  Pada 4 (Moksha) — unbuffered, off the grid")
+    lines.append(f"  Entered: {transit['nakshatra']['entered']}")
+    lines.append(f"  Exits:   {transit['nakshatra']['exits']}")
+
+    # Personal dasha context
+    if name:
+        try:
+            chart = _load_local_chart(name)
+            if chart:
+                bd = chart.get('birthData', {})
+                birth_date = bd.get('date', chart.get('date', ''))
+                moon_lon = chart.get('moon_lon')
+
+                # If no moon_lon stored, try to compute from natal chart
+                if moon_lon is None:
+                    # Try planets list
+                    planets = chart.get('planets', [])
+                    for p in planets:
+                        if p.get('name', '').lower() == 'moon':
+                            moon_lon = p.get('longitude', p.get('lon'))
+                            break
+
+                if moon_lon is not None:
+                    dasha_result = compute_dasha_stack(birth_date, float(moon_lon))
+                    if dasha_result and 'stack' in dasha_result:
+                        levels = dasha_result['stack']
+                        maha = levels[0]
+                        bhukti = levels[1] if len(levels) > 1 else None
+
+                        lines.append(f"")
+                        lines.append(f"  ── {name}'s Dasha Context ──")
+                        lines.append(f"  Maha: {maha['glyph']}{maha['lord']} ({maha['start'][:10]}→{maha['end'][:10]})")
+                        if bhukti:
+                            lines.append(f"  Bhukti: {bhukti['glyph']}{bhukti['lord']} ({bhukti['start'][:10]}→{bhukti['end'][:10]})")
+
+                        # Check transit-dasha relationship
+                        transit_lord_name = nak_lord
+                        if transit_lord_name == maha['lord']:
+                            lines.append(f"  ★ Moon transiting YOUR maha dasha lord's territory")
+                        elif bhukti and transit_lord_name == bhukti['lord']:
+                            lines.append(f"  ★ Moon transiting YOUR bhukti lord's territory")
+                        else:
+                            lines.append(f"  Moon transiting {nak_lord}'s territory")
+                else:
+                    lines.append(f"  (No natal Moon longitude found for {name})")
+        except Exception as e:
+            lines.append(f"  (Could not load dasha for {name}: {e})")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+async def get_moon_square_day(
+    target_date: str = None,
+    range_days: int = 0,
+) -> str:
+    """Moon Square daily nakshatra tracker.
+
+    The Moon's 9×9 magic square cycles through 27 nakshatras, advancing 3 cells
+    per day from the Chitra center. Epoch: Lichun 2022 (Great Year gate boundary).
+    Full cycle = 27 days.
+
+    Args:
+        target_date: Date to compute for (YYYY-MM-DD, default today)
+        range_days: Show surrounding days (-N to +N). 0 = just target date.
+                    Max 27 (full cycle).
+
+    Returns:
+        Current Moon square position with nakshatra, walk values, grid coordinates.
+    """
+    from datetime import timedelta
+
+    if target_date:
+        base = datetime.strptime(target_date, "%Y-%m-%d").date()
+    else:
+        base = datetime.now().date()
+
+    range_days = min(abs(range_days), 27)
+
+    if range_days == 0:
+        result = _moon_square_day(base)
+        lines = []
+        lines.append(f"☽ Moon Square — {result['date']}")
+        lines.append(f"Cycle day {result['cycle']['day_in_cycle']}/27 "
+                      f"(cycle #{result['cycle']['full_cycles_completed'] + 1})")
+        lines.append("")
+        nak = result['nakshatra']
+        lines.append(f"  Nakshatra {nak['number']}: {nak['name']} ({nak['lord']})")
+        lines.append(f"  Walk values: {result['walk_values']}")
+        for p in result['padas']:
+            lines.append(f"    {p['value']:2d} → {p['grid']} ({p['pada']})")
+        lines.append(f"  Digital root: {result['digital_root']}")
+        return "\n".join(lines)
+    else:
+        lines = [f"☽ Moon Square — {range_days*2+1} days around {base.isoformat()}", ""]
+        for d in range(-range_days, range_days + 1):
+            dt = base + timedelta(days=d)
+            r = _moon_square_day(dt)
+            nak = r['nakshatra']
+            marker = " ◄" if d == 0 else ""
+            lines.append(
+                f"  {r['date']}  cycle {r['cycle']['day_in_cycle']:2d}  "
+                f"{nak['name']:22s} ({nak['lord']:10s})  "
+                f"vals {r['walk_values']}{marker}"
+            )
+        return "\n".join(lines)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# MOON SQUARE — TAO TE CHING READING
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+_TTC_CHAPTERS = None
+
+
+def _load_ttc():
+    """Load Tao Te Ching chapters (Hinton translation) from JSON."""
+    global _TTC_CHAPTERS
+    if _TTC_CHAPTERS is None:
+        ttc_path = STELLA_DIR / "tao_te_ching.json"
+        if ttc_path.exists():
+            with open(ttc_path) as f:
+                _TTC_CHAPTERS = json.load(f)
+        else:
+            _TTC_CHAPTERS = {}
+    return _TTC_CHAPTERS
+
+
+def _ttc_chapter_for_nakshatra(nak_num: int) -> int:
+    """Given a nakshatra number (1-27), return the TTC chapter.
+
+    The Moon's walk starts at Chitra (nakshatra 14) = walk steps 40, 41, 42.
+    Each nakshatra offset = +3 walk steps. The center step (middle pada)
+    maps directly to a Tao Te Ching chapter (1-81).
+    """
+    offset = (nak_num - 14) % 27
+    center_step = ((41 - 1 + offset * 3) % 81) + 1
+    return center_step
+
+
+@mcp.tool()
+async def get_moon_tao(
+    target_date: str = None,
+    range_days: int = 0,
+    name: str = None,
+) -> str:
+    """Moon Square × Tao Te Ching daily reading.
+
+    The Moon transits one nakshatra per day (~13°/day through 13°20' divisions).
+    Each nakshatra maps to 3 walk steps in the 9×9 Moon square, starting from
+    Chitra (center). The center step = a Tao Te Ching chapter (Hinton translation).
+
+    Shows today's chapter with flanking chapters (previous and next padas)
+    as context. Uses the Moon's ACTUAL sidereal position, not the epoch cycle.
+
+    Args:
+        target_date: Date for reading (YYYY-MM-DD, default today)
+        range_days: Show surrounding days (0-13). 0 = just target.
+        name: Chart name for natal Moon nakshatra context (optional)
+
+    Returns:
+        Daily TTC reading based on Moon's nakshatra position.
+    """
+    import swisseph as swe
+    swe.set_ephe_path("/mnt/baratie/baratie/sweph-service/ephemeris")
+
+    ttc = _load_ttc()
+    if not ttc:
+        return "Error: tao_te_ching.json not found in stella directory."
+
+    if target_date:
+        base = datetime.strptime(target_date, "%Y-%m-%d")
+    else:
+        base = datetime.now()
+
+    range_days = min(abs(range_days), 13)
+
+    # Lahiri ayanamsa for sidereal
+    jd_base = _datetime_to_jd(base)
+
+    def _reading_for_jd(jd):
+        moon_lon = swe.calc_ut(jd, swe.MOON)[0][0]
+        ayan = swe.get_ayanamsa_ut(jd)
+        sid = (moon_lon - ayan) % 360
+        nak_num = int(sid / (360 / 27)) + 1  # 1-27
+        pada = int((sid % (360 / 27)) / (360 / 108)) + 1  # 1-4
+        nak_name = _MOON_NAKSHATRAS[nak_num - 1][0]
+        nak_lord = _MOON_NAKSHATRAS[nak_num - 1][1]
+
+        chapter = _ttc_chapter_for_nakshatra(nak_num)
+        # Flanking chapters (previous and next walk steps)
+        left_ch = ((chapter - 2) % 81) + 1
+        right_ch = (chapter % 81) + 1
+
+        return {
+            "nak_num": nak_num,
+            "nak_name": nak_name,
+            "nak_lord": nak_lord,
+            "pada": pada,
+            "sid_deg": sid,
+            "chapter": chapter,
+            "left_chapter": left_ch,
+            "right_chapter": right_ch,
+        }
+
+    def _format_chapter(ch_num, full=False):
+        text = ttc.get(str(ch_num), f"(Chapter {ch_num} not available)")
+        if full:
+            return text
+        # First 4 meaningful lines for flanks
+        lines = [l for l in text.split("\n") if l.strip()]
+        return "\n".join(lines[:4])
+
+    if range_days == 0:
+        # Single day — full reading with flanks
+        r = _reading_for_jd(jd_base)
+        lines = []
+        lines.append("☽ Moon Square × Tao Te Ching")
+        lines.append(f"  {base.strftime('%Y-%m-%d')}")
+        lines.append(f"  Moon: {r['sid_deg']:.1f}° sidereal")
+        lines.append(f"  Nakshatra {r['nak_num']}: {r['nak_name']} "
+                      f"({r['nak_lord']}), Pada {r['pada']}")
+        lines.append("")
+
+        # Left flank
+        lines.append(f"── Ch. {r['left_chapter']} (leaving) ──")
+        lines.append(_format_chapter(r["left_chapter"]))
+        lines.append("")
+
+        # Center
+        lines.append(f"══ Ch. {r['chapter']} (present) ══")
+        lines.append(_format_chapter(r["chapter"], full=True))
+        lines.append("")
+
+        # Right flank
+        lines.append(f"── Ch. {r['right_chapter']} (entering) ──")
+        lines.append(_format_chapter(r["right_chapter"]))
+
+        # Natal context if chart name given
+        if name:
+            try:
+                chart = _load_local_chart(name)
+                if chart:
+                    natal_moon = None
+                    for body in chart.get("planets", []):
+                        if body.get("name") == "Moon":
+                            natal_moon = body.get("longitude")
+                            break
+                    if natal_moon is not None:
+                        ayan = swe.get_ayanamsa_ut(jd_base)
+                        natal_sid = (natal_moon - ayan) % 360
+                        natal_nak = int(natal_sid / (360 / 27)) + 1
+                        natal_ch = _ttc_chapter_for_nakshatra(natal_nak)
+                        natal_name = _MOON_NAKSHATRAS[natal_nak - 1][0]
+                        lines.append("")
+                        lines.append(f"── Natal Moon: {natal_name} "
+                                      f"(#{natal_nak}) → Ch. {natal_ch} ──")
+                        lines.append(_format_chapter(natal_ch))
+            except Exception:
+                pass
+
+        return "\n".join(lines)
+    else:
+        # Range view
+        lines = ["☽ Moon × Tao Te Ching — Daily Chapters", ""]
+        from datetime import timedelta
+        for d in range(-range_days, range_days + 1):
+            dt = base + timedelta(days=d)
+            jd = _datetime_to_jd(dt)
+            r = _reading_for_jd(jd)
+            first_line = ttc.get(str(r["chapter"]), "?").split("\n")[0]
+            first_line = first_line.strip()
+            if len(first_line) > 50:
+                first_line = first_line[:47] + "..."
+            marker = " ◄" if d == 0 else ""
+            lines.append(
+                f"  {dt.strftime('%b %d')}  "
+                f"{r['nak_name']:22s}  "
+                f"Ch.{r['chapter']:2d}  "
+                f"\"{first_line}\"{marker}"
+            )
+        return "\n".join(lines)
+
+
+def _datetime_to_jd(dt):
+    """Convert datetime to Julian Day (noon-based, UT)."""
+    import swisseph as swe
+    if isinstance(dt, datetime):
+        hour = dt.hour + dt.minute / 60 + dt.second / 3600
+        return swe.julday(dt.year, dt.month, dt.day, hour)
+    else:
+        # date object, use noon
+        return swe.julday(dt.year, dt.month, dt.day, 12.0)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SABIAN SYMBOLS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SIGN_ORDER = ['Aries','Taurus','Gemini','Cancer','Leo','Virgo',
+              'Libra','Scorpio','Sagittarius','Capricorn','Aquarius','Pisces']
+
+
+@mcp.tool()
+async def get_sabian_symbol(
+    sign: str,
+    degree: int,
+) -> str:
+    """Get the Sabian Symbol for a specific zodiac degree.
+
+    Args:
+        sign: Zodiac sign (e.g. 'Taurus', 'Scorpio')
+        degree: Degree within the sign (1-30)
+
+    Returns:
+        The Sabian Symbol image, interpretation, decan ruler, and pip card.
+    """
+    sign_cap = sign.strip().title()
+    if sign_cap not in SIGN_ORDER:
+        return f"Unknown sign: {sign}. Use full sign name (e.g. 'Aries', 'Pisces')."
+    if not (1 <= degree <= 30):
+        return f"Degree must be 1-30, got {degree}."
+
+    rows = neo4j_query(
+        "MATCH (s:SabianSymbol {sign: $sign, degree: $degree}) "
+        "RETURN s.image as image, s.interpretation as interp, "
+        "s.decan_ruler as decan_ruler, s.pip_card as pip_card, "
+        "s.modality as modality, s.element as element, s.decan as decan",
+        sign=sign_cap, degree=degree
+    )
+    if not rows:
+        return f"No Sabian Symbol found for {sign_cap} {degree}°."
+
+    r = rows[0]
+    lines = [
+        f"**{sign_cap} {degree}°**",
+        f"*\"{r['image']}\"*",
+        "",
+        f"**Decan:** {r['decan']} ({r['decan_ruler']}) | **Pip:** {r['pip_card']} | **Modality:** {r['modality']} | **Element:** {r['element']}",
+        "",
+        r['interp'] or ""
+    ]
+    return "\n".join(lines)
+
+
+@mcp.tool()
+async def get_sabian_symbols_for_chart(
+    name: str,
+) -> str:
+    """Get Sabian Symbols for all natal placements in a stored chart.
+
+    Args:
+        name: Chart name (e.g. 'chris', 'lisa', 'betsy')
+
+    Returns:
+        Sabian Symbol for each planet, ASC, and MC with image, decan ruler, and pip card.
+    """
+    # Load chart from Neo4j
+    placements = neo4j_query(
+        "MATCH (c:Chart {name: $name})-[:HAS_PLACEMENT]->(p:NatalPlacement) "
+        "RETURN p.body as body, p.sign as sign, p.degree as degree, p.minutes as minutes "
+        "ORDER BY CASE p.body "
+        "  WHEN 'Sun' THEN 0 WHEN 'Moon' THEN 1 WHEN 'Mercury' THEN 2 "
+        "  WHEN 'Venus' THEN 3 WHEN 'Mars' THEN 4 WHEN 'Jupiter' THEN 5 "
+        "  WHEN 'Saturn' THEN 6 WHEN 'Uranus' THEN 7 WHEN 'Neptune' THEN 8 "
+        "  WHEN 'Pluto' THEN 9 WHEN 'ASC' THEN 10 WHEN 'MC' THEN 11 "
+        "  WHEN 'North Node' THEN 12 WHEN 'South Node' THEN 13 "
+        "  ELSE 20 END",
+        name=name.strip().lower()
+    )
+    if not placements:
+        return f"No chart found for '{name}'. Use list_stored_charts to see available charts."
+
+    lines = [f"# Sabian Symbols — {name.title()}'s Chart\n"]
+
+    for p in placements:
+        body = p['body']
+        sign = p['sign']
+        deg_raw = p.get('degree', 0)
+        minutes = p.get('minutes', 0)
+
+        # Sabian tradition: round up (any minutes = next degree)
+        # Sabian degree 1 = 0°00'-0°59', degree 30 = 29°00'-29°59'
+        sabian_deg = int(deg_raw) + 1 if int(deg_raw) < 30 else 30
+        # If degree is already integer and minutes > 0, we're in the next Sabian degree
+        # If degree is 0 with 0 minutes, Sabian degree = 1
+
+        rows = neo4j_query(
+            "MATCH (s:SabianSymbol {sign: $sign, degree: $degree}) "
+            "RETURN s.image as image, s.decan_ruler as decan_ruler, s.pip_card as pip_card",
+            sign=sign, degree=sabian_deg
+        )
+
+        if rows:
+            r = rows[0]
+            lines.append(
+                f"**{body}** {sign} {deg_raw}°{minutes:02d}' → "
+                f"*{r['image'][:80]}{'…' if len(r['image']) > 80 else ''}* "
+                f"({r['decan_ruler']}, {r['pip_card']})"
+            )
+        else:
+            lines.append(f"**{body}** {sign} {deg_raw}°{minutes:02d}' → (no symbol found)")
+
+    return "\n".join(lines)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
