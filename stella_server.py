@@ -6335,16 +6335,18 @@ async def get_sabian_symbols_for_chart(
     Returns:
         Sabian Symbol for each planet, ASC, and MC with image, decan ruler, and pip card.
     """
-    # Load chart from Neo4j
+    # Load chart from Neo4j — property is 'planet', degree is decimal float
     placements = neo4j_query(
         "MATCH (c:Chart {name: $name})-[:HAS_PLACEMENT]->(p:NatalPlacement) "
-        "RETURN p.body as body, p.sign as sign, p.degree as degree, p.minutes as minutes "
-        "ORDER BY CASE p.body "
+        "WHERE p.is_planet = true OR p.planet IN ['ASC','MC','North_Node','South_Node','Lot_Fortune','Lot_Spirit'] "
+        "RETURN p.planet as planet, p.sign as sign, p.degree as degree "
+        "ORDER BY CASE p.planet "
         "  WHEN 'Sun' THEN 0 WHEN 'Moon' THEN 1 WHEN 'Mercury' THEN 2 "
         "  WHEN 'Venus' THEN 3 WHEN 'Mars' THEN 4 WHEN 'Jupiter' THEN 5 "
         "  WHEN 'Saturn' THEN 6 WHEN 'Uranus' THEN 7 WHEN 'Neptune' THEN 8 "
         "  WHEN 'Pluto' THEN 9 WHEN 'ASC' THEN 10 WHEN 'MC' THEN 11 "
-        "  WHEN 'North Node' THEN 12 WHEN 'South Node' THEN 13 "
+        "  WHEN 'North_Node' THEN 12 WHEN 'South_Node' THEN 13 "
+        "  WHEN 'Lot_Fortune' THEN 14 WHEN 'Lot_Spirit' THEN 15 "
         "  ELSE 20 END",
         name=name.strip().lower()
     )
@@ -6354,16 +6356,15 @@ async def get_sabian_symbols_for_chart(
     lines = [f"# Sabian Symbols — {name.title()}'s Chart\n"]
 
     for p in placements:
-        body = p['body']
+        planet = p['planet'].replace('_', ' ')
         sign = p['sign']
-        deg_raw = p.get('degree', 0)
-        minutes = p.get('minutes', 0)
+        deg_float = p.get('degree', 0.0) or 0.0
+        deg_int = int(deg_float)
+        minutes = int((deg_float - deg_int) * 60)
 
-        # Sabian tradition: round up (any minutes = next degree)
-        # Sabian degree 1 = 0°00'-0°59', degree 30 = 29°00'-29°59'
-        sabian_deg = int(deg_raw) + 1 if int(deg_raw) < 30 else 30
-        # If degree is already integer and minutes > 0, we're in the next Sabian degree
-        # If degree is 0 with 0 minutes, Sabian degree = 1
+        # Sabian tradition: degree N covers (N-1)°00' to (N-1)°59'
+        # So 11.07° = 11°04' → Sabian degree 12
+        sabian_deg = deg_int + 1 if deg_int < 30 else 30
 
         rows = neo4j_query(
             "MATCH (s:SabianSymbol {sign: $sign, degree: $degree}) "
@@ -6374,12 +6375,12 @@ async def get_sabian_symbols_for_chart(
         if rows:
             r = rows[0]
             lines.append(
-                f"**{body}** {sign} {deg_raw}°{minutes:02d}' → "
+                f"**{planet}** {sign} {deg_int}°{minutes:02d}' → "
                 f"*{r['image'][:80]}{'…' if len(r['image']) > 80 else ''}* "
                 f"({r['decan_ruler']}, {r['pip_card']})"
             )
         else:
-            lines.append(f"**{body}** {sign} {deg_raw}°{minutes:02d}' → (no symbol found)")
+            lines.append(f"**{planet}** {sign} {deg_int}°{minutes:02d}' → (no symbol found)")
 
     return "\n".join(lines)
 
