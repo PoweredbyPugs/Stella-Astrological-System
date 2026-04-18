@@ -25,18 +25,12 @@ from urllib.parse import urlencode
 
 import httpx
 from openai import OpenAI
-from neo4j import GraphDatabase
 from mcp.server.fastmcp import FastMCP
 
-# ── Config ──
-STELLA_DIR = Path(__file__).parent
-SWEPH_API_BASE = os.environ.get("SWEPH_API_BASE", "http://baratie:3000")
-TRUST_LABELS = {1: "PRIMARY", 2: "BRIDGE", 3: "REFERENCE", 4: "PERIPHERAL"}
+from stella_config import NEO4J_URI, STELLA_DIR, SWEPH_API_BASE, open_neo4j_driver
 
-# Neo4j
-NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
-NEO4J_USER = os.environ.get("NEO4J_USER", "neo4j")
-NEO4J_PASS = os.environ.get("NEO4J_PASS", "selene_gnosis")
+# ── Config ──
+TRUST_LABELS = {1: "PRIMARY", 2: "BRIDGE", 3: "REFERENCE", 4: "PERIPHERAL"}
 
 # ── Init ──
 mcp = FastMCP("stella")
@@ -76,7 +70,7 @@ def get_neo4j():
     """Get or create Neo4j driver singleton."""
     global _neo4j_driver
     if _neo4j_driver is None:
-        _neo4j_driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASS))
+        _neo4j_driver, _ = open_neo4j_driver()
     return _neo4j_driver
 
 

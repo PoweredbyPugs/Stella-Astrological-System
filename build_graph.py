@@ -3,24 +3,14 @@
 Build the Selene Knowledge Graph in Neo4j.
 
 Phase 2: Structural graph — the astrological skeleton.
-Phase 3: Knowledge migration — 6,160 chunks from ChromaDB → graph nodes.
+Phase 3: Optional legacy knowledge migration from ChromaDB → graph nodes.
 
 Run once to initialize, idempotent via MERGE.
 """
 
-import json
 import sys
-from pathlib import Path
 
-from neo4j import GraphDatabase
-
-# ── Config ──
-NEO4J_URI = "bolt://localhost:7687"
-NEO4J_USER = "neo4j"
-NEO4J_PASS = "selene_gnosis"
-
-SELENE_DIR = Path(__file__).parent
-CHROMA_DIR = SELENE_DIR.parent / "astro-knowledge" / "chromadb_store"
+from stella_config import CHROMA_DIR, NEO4J_URI, chroma_has_store, open_neo4j_driver
 
 # ══════════════════════════════════════════════════════════════
 # PHASE 2: STRUCTURAL GRAPH — The Astrological Skeleton
@@ -350,15 +340,38 @@ def build_structural_graph(driver):
 
 def migrate_knowledge(driver):
     """Phase 3: Transform ChromaDB chunks into graph Interpretation nodes."""
-    import chromadb
+    try:
+        import chromadb
+        from chromadb.errors import NotFoundError
+    except ImportError as exc:
+        raise RuntimeError(
+            "Chroma knowledge migration is optional and chromadb is not installed. "
+            "Install it only if you want legacy knowledge import: `pip install chromadb`."
+        ) from exc
+
+    if not chroma_has_store(CHROMA_DIR):
+        raise RuntimeError(
+            f"No Chroma store found at {CHROMA_DIR}. Knowledge migration is optional; "
+            "skip it unless you actually use the legacy Chroma knowledge base."
+        )
 
     class NoOpEmbedding(chromadb.EmbeddingFunction):
+        def __init__(self) -> None:
+            pass
+
         def __call__(self, input):
             return [[0.0] * 1536 for _ in input]
 
     print("\n[Phase 3] Migrating knowledge from ChromaDB...")
     chroma = chromadb.PersistentClient(path=str(CHROMA_DIR))
-    collection = chroma.get_collection("astro_knowledge", embedding_function=NoOpEmbedding())
+    try:
+        collection = chroma.get_collection("astro_knowledge", embedding_function=NoOpEmbedding())
+    except NotFoundError as exc:
+        raise RuntimeError(
+            f"Collection 'astro_knowledge' not found in {CHROMA_DIR}. "
+            "Run `git lfs install && git lfs pull`, then rerun. "
+            "If the store lives elsewhere, set CHROMA_DIR in .env."
+        ) from exc
 
     total = collection.count()
     print(f"  Source: {total} chunks in ChromaDB")
@@ -562,21 +575,23 @@ def verify_graph(driver):
 
 
 if __name__ == "__main__":
-    driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASS))
+    driver, _password = open_neo4j_driver()
 
     try:
-        driver.verify_connectivity()
-        print(f"Connected to Neo4j at {NEO4J_URI}\n")
+        print(f"Connected to Neo4j at {NEO4J_URI} (auth ok)\n")
 
         if "--phase2-only" in sys.argv:
             build_structural_graph(driver)
         elif "--phase3-only" in sys.argv:
             migrate_knowledge(driver)
+        elif "--with-knowledge" in sys.argv:
+            build_structural_graph(driver)
+            migrate_knowledge(driver)
+            verify_graph(driver)
         elif "--verify" in sys.argv:
             verify_graph(driver)
         else:
             build_structural_graph(driver)
-            migrate_knowledge(driver)
             verify_graph(driver)
 
     finally:

@@ -26,26 +26,14 @@ echo "✓ Venv activated ($(python --version))"
 echo ""
 echo "Installing Python dependencies..."
 pip install -q --upgrade pip
-pip install -q mcp chromadb openai httpx pydantic neo4j
+pip install -q -r "$STELLA_DIR/requirements.txt"
 echo "✓ Dependencies installed"
 
-# ── 3. ChromaDB store ──
+# ── 3. Optional legacy knowledge note ──
 echo ""
-if [ -d "$STELLA_DIR/chromadb_store" ] && [ -f "$STELLA_DIR/chromadb_store/chroma.sqlite3" ]; then
-    SIZE=$(du -sh "$STELLA_DIR/chromadb_store" | cut -f1)
-    echo "✓ ChromaDB knowledge store found ($SIZE)"
-else
-    echo "⚠ ChromaDB store not found or incomplete."
-    echo "  If you cloned without Git LFS, run:"
-    echo "    git lfs install && git lfs pull"
-    echo ""
-    read -p "  Run git lfs pull now? [y/N] " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        git lfs pull
-        echo "✓ LFS files pulled"
-    fi
-fi
+echo "Note: legacy Chroma knowledge import is optional and not required for Stella MCP setup."
+echo "If you ever want the old Chroma migration path later, install git-lfs + chromadb then run:"
+echo "  ./.venv/bin/python build_graph.py --with-knowledge"
 
 # ── 4. OpenAI API Key ──
 echo ""
@@ -53,7 +41,7 @@ if [ -n "$OPENAI_API_KEY" ]; then
     echo "✓ OPENAI_API_KEY is set"
 else
     echo "⚠ OPENAI_API_KEY not found in environment."
-    echo "  Stella needs this for knowledge graph search (embeddings)."
+    echo "  Optional: some Stella features use it, but basic setup/MCP does not require it."
     read -p "  Enter your OpenAI API key (or press Enter to skip): " API_KEY
     if [ -n "$API_KEY" ]; then
         export OPENAI_API_KEY="$API_KEY"
@@ -69,7 +57,7 @@ fi
 echo ""
 SWEPH_URL="${SWEPH_API_BASE:-http://baratie:3000}"
 echo "Checking Helios at $SWEPH_URL..."
-if curl -s --connect-timeout 3 "$SWEPH_URL/api/current-moon" > /dev/null 2>&1; then
+if curl -s --connect-timeout 3 "$SWEPH_URL/api-info" > /dev/null 2>&1; then
     echo "✓ Helios is reachable"
 else
     echo "⚠ Helios not reachable at $SWEPH_URL"
@@ -109,28 +97,39 @@ echo ""
 echo "Add this to your mcporter config (npx mcporter config edit):"
 echo ""
 echo "  \"stella\": {"
-echo "    \"type\": \"stdio\","
-echo "    \"command\": \"$VENV_DIR/bin/python\","
+echo "    \"type\": \"stdio\"," 
+echo "    \"command\": \"$VENV_DIR/bin/python\"," 
 echo "    \"args\": [\"$STELLA_DIR/stella_server.py\"],"
 echo "    \"env\": {"
-echo "      \"OPENAI_API_KEY\": \"${OPENAI_API_KEY:-<your-key-here>}\""
+echo "      \"SWEPH_API_BASE\": \"${SWEPH_API_BASE:-http://100.102.99.117:3000}\""
 echo "    }"
 echo "  }"
+echo ""
+
+echo "─── Claude Desktop Configuration ───"
+echo ""
+echo "{"
+echo "  \"mcpServers\": {"
+echo "    \"stella\": {"
+echo "      \"command\": \"$VENV_DIR/bin/python\"," 
+echo "      \"args\": [\"$STELLA_DIR/stella_server.py\"],"
+echo "      \"env\": {"
+echo "        \"SWEPH_API_BASE\": \"${SWEPH_API_BASE:-http://100.102.99.117:3000}\""
+echo "      }"
+echo "    }"
+echo "  }"
+echo "}"
 echo ""
 
 # ── 8. Verify ──
 echo "─── Verification ───"
 echo ""
-echo "Testing Stella server..."
-if timeout 10 "$VENV_DIR/bin/python" -c "
-import stella_server
-print('✓ Stella imports successfully')
-print(f'  ChromaDB: {stella_server.CHROMA_DIR}')
-print(f'  Helios: {stella_server.SWEPH_API_BASE}')
-" 2>/dev/null; then
+echo "Running Stella doctor..."
+if "$VENV_DIR/bin/python" "$STELLA_DIR/stella_doctor.py"; then
     echo ""
 else
-    echo "⚠ Import test failed — check error messages above"
+    echo ""
+    echo "⚠ Doctor found one or more setup issues above."
 fi
 
 echo ""
@@ -138,5 +137,5 @@ echo "🌙 Setup complete!"
 echo ""
 echo "Quick test:"
 echo "  npx mcporter call stella.get_current_moon"
-echo "  npx mcporter call stella.knowledge_search query=\"essential dignities\""
 echo "  npx mcporter call stella.list_charts"
+echo "  ./.venv/bin/python build_graph.py"
