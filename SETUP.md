@@ -29,6 +29,8 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+This installs `pyswisseph` too, which Stella needs at startup for the native ephemeris tools.
+
 ### 3. Environment Variables
 
 | Variable | Required | Default | Notes |

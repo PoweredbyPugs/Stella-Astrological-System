@@ -3,3 +3,4 @@ openai
 httpx
 pydantic
 neo4j
+pyswisseph
