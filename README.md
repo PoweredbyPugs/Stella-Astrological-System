@@ -1,6 +1,6 @@
 # Stella — Unified Astrology & Divination MCP Server 🌙
 
-**Repo:** [PoweredbyPugs/Stella-mcp](https://github.com/PoweredbyPugs/Stella-mcp) (private)
+**Repo:** [PoweredbyPugs/Stella-Astrological-System](https://github.com/PoweredbyPugs/Stella-Astrological-System) (private)
 
 The Moon of Gnosis. A single Python MCP server that unifies ephemeris computation,
 a 6,500+ chunk knowledge graph, chart reading generation, emergent pattern detection,
@@ -9,7 +9,7 @@ and a learning memory system.
 ## Quick Start
 
 ```bash
-git clone https://github.com/PoweredbyPugs/Stella-mcp.git stella
+git clone https://github.com/PoweredbyPugs/Stella-Astrological-System.git stella
 cd stella
 bash setup.sh
 ```

@@ -5,7 +5,7 @@
 ```bash
 cd ~/clawd
 git lfs install
-git clone https://github.com/PoweredbyPugs/Stella-mcp.git stella
+git clone https://github.com/PoweredbyPugs/Stella-Astrological-System.git stella
 cd stella
 bash setup.sh
 ```
@@ -17,7 +17,7 @@ The setup script handles everything: venv, deps, Neo4j (optional), and prints th
 ### 1. Clone
 
 ```bash
-git clone https://github.com/PoweredbyPugs/Stella-mcp.git stella
+git clone https://github.com/PoweredbyPugs/Stella-Astrological-System.git stella
 ```
 
 ### 2. Python Virtual Environment
