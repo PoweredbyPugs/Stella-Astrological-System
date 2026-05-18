@@ -2,9 +2,24 @@ __pycache__/
 *.pyc
 .venv/
 *.egg-info/
+
+# Personal chart data — never commit
 charts/*.json
+charts/*.bak
 charts/readings/
 charts/memory/*.json
+
+# Personal readings and session memory
+reports/
+examples/
+autopoietic/sessions/
+
+# Optional knowledge store (LFS / local-only)
 chromadb_store/
+
+# Knowledge-graph ingestion artifacts (preserved on the `ingest` branch)
+ingest-tmp-*
+
+# Internal/working docs that don't belong in the repo
 ARCHITECTURE.md
 CONSTELLATION-AGENT.md
